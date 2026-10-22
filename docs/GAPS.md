@@ -59,7 +59,13 @@ service control policies cap what even the account's admin can do. Each restrict
 - **The EKS public endpoint is enabled,** restricted to my home IP.
   - *Fix:* private-only endpoint plus a VPN, SSM bastion or Client VPN.
 - **The Atlantis webhook is public,** restricted to GitHub hook CIDRs and protected by a webhook secret.
-- **No WAF on the ALB.** *Fix:* AWS WAF with managed rule groups and rate-based rules.
+- **WAF rate limiting is per source IP and approximate.** WAF evaluates rate-based rules every few seconds over a
+  60 s window, so a client gets some requests above 10 RPS through before 429s start (load test: 885 × 200 then
+  2,080 × 429 at ~20 RPS). Clients behind one NAT/proxy share a budget. *Fix:* key on a header/API key or a
+  forwarded-IP header for known proxies; add per-path limits.
+- **WAF can't front an NLB** (layer 4). Kept the ALB so rate limiting can return HTTP 429.
+- **WAF managed rule groups run in block mode with defaults** (no tuning, no count-mode trial period).
+  *Fix:* run new rule groups in count mode first, review the logs, then enable blocking.
 - **No image signing or admission policy.** *Fix:* cosign signing in CI and Kyverno/Gatekeeper to verify signatures and enforce the pod security baseline.
 - **No GuardDuty, Security Hub or CloudTrail lake setup.** These are account-level and out of scope.
 - **Pod-to-RDS access is controlled by the node SG, not security groups for pods.** Any pod on a node can reach port 5432 at the network level. IAM auth still limits *who* can log in, and NetworkPolicies limit which pods can connect.
