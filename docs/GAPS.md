@@ -12,6 +12,7 @@ service control policies cap what even the account's admin can do. Each restrict
 | All `iam:*OpenIDConnectProvider` denied | **IRSA** (needs the cluster's OIDC issuer registered in IAM) | **EKS Pod Identity**: roles trust `pods.eks.amazonaws.com`; pairing via `aws_eks_pod_identity_association` | Either works; Pod Identity is AWS's current recommendation anyway |
 | (same) | **GitHub Actions OIDC → AWS role** for pushing images to ECR | Phase 1: push from the laptop (`make image`). Phase 3: build on a GitHub-hosted runner, push from an in-cluster runner with a Pod Identity role scoped to the one ECR repo | GitHub OIDC provider + role trusted only for `repo:balusarakesh/hw-platform:ref:refs/heads/main` (no runner in the cluster needed) |
 | `ec2:CreateFleet` denied | **Karpenter** (and EKS Auto Mode) launch nodes with CreateFleet | **Cluster Autoscaler** scaling the managed node group's ASG | Karpenter: faster, bin-packing, mixed instance types and Spot |
+| Route 53 Domains registration fails (likely the account can't pay for domains) | Registering the domain in AWS | External registrar, NS delegated to a Terraform-managed Route 53 zone | Route 53 Domains |
 | $100/month spend limit | Running everything 24/7 (~$135/month idle) | Power-off script, budget alerts at $50/$75/$90 | Normal budget alerts |
 
 - **GitHub Actions has no AWS identity.** Because of the OIDC guardrail, nothing running on GitHub's
@@ -47,7 +48,10 @@ service control policies cap what even the account's admin can do. Each restrict
   - *Fix:* use the GitHub App manifest flow to make it one click; there is no full automation.
 - **The GitHub App private key is a long-lived credential.** It isn't an AWS credential. It's stored in Secrets Manager and synced via ESO, and rotation is manual.
   - *Fix:* scheduled rotation plus alerting on key age.
-- **Domain registration is outside Terraform** (billable, needs contact details). Terraform looks up the auto-created hosted zone instead of managing it, so a destroy can never remove it.
+- **Domain registration is outside Terraform and outside AWS.** Route 53 Domains rejected the registration on this
+  account (instant failure, "contact Support"), so the domain is registered at an external registrar and its NS records
+  point at a Route 53 zone that the bootstrap stack creates. Delegation is a manual step at the registrar.
+  *Fix:* register in Route 53 Domains (or manage the registrar via its Terraform provider) so delegation is code too.
 - **The SNS email subscription** must be confirmed by hand.
 - **`/hw/admin_cidrs` (home IP)** is set by hand and must be updated when the home IP changes.
 

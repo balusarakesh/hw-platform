@@ -17,7 +17,7 @@ variable "project" {
 }
 
 variable "domain" {
-  description = "Route 53 domain (registered by hand; its hosted zone is looked up, not created)."
+  description = "Domain whose hosted zone the bootstrap stack created."
   type        = string
   default     = "test-hw-app.click"
 }

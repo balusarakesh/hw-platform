@@ -1,6 +1,5 @@
-# The domain was registered by hand in Route 53 Domains (billable, needs contact details),
-# which auto-created this hosted zone. We look it up rather than manage it, so a
-# `terraform destroy` can never take the zone (and the registration's NS records) with it.
+# The hosted zone is created by the bootstrap stack (the domain is registered at an external
+# registrar and delegated to it). Looked up here so this stack can never destroy it.
 data "aws_route53_zone" "main" {
   name         = var.domain
   private_zone = false

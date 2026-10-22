@@ -71,12 +71,15 @@ IAM database auth, deployed by **ArgoCD + helmfile**, all provisioned with **Ter
 
 Prerequisites: Terraform ≥ 1.17, AWS CLI (profile `default`), `gh`, Docker via Colima, `crane`.
 
-1. **Manual, once:** register the domain in Route 53, then set the two sensitive parameters (never in git):
+1. **Manual, once:** register the domain at any registrar (Route 53 Domains registration is unavailable on this
+   account), then set the two sensitive parameters (never in git):
    ```bash
    aws ssm put-parameter --name /hw/alert_email --type SecureString --value '<email>'
    aws ssm put-parameter --name /hw/admin_cidrs --type SecureString --value "$(curl -s https://checkip.amazonaws.com)/32"
    ```
-2. **Bootstrap:** `export GITHUB_TOKEN=$(gh auth token) && make bootstrap`
+2. **Bootstrap:** `export GITHUB_TOKEN=$(gh auth token) && make bootstrap`, then set the domain's name servers at
+   the registrar to `terraform -chdir=terraform/bootstrap output name_servers` and wait for
+   `dig NS test-hw-app.click +short` to return them.
 3. **Persistent:** `make plan STACK=persistent && make apply STACK=persistent`
 4. **First image:** `colima start --arch aarch64 && make image` (commit the updated image tag/digest in `gitops/apps/hello-world/values.yaml`), push to `main`
 5. **Cluster:** `make plan STACK=cluster && make apply STACK=cluster`, then `make kubeconfig`
