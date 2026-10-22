@@ -97,10 +97,9 @@ locals {
           # the host network, so it sees the node's ENA interface. Values are cumulative counters
           # (alarms use DIFF); published per instance plus one cluster-wide aggregate (no dimensions).
           metrics = {
-            namespace                   = "hw/ENA"
-            metrics_collection_interval = 60
-            append_dimensions           = { InstanceId = "$${aws:InstanceId}" }
-            aggregation_dimensions      = [[]]
+            namespace              = "hw/ENA"
+            append_dimensions      = { InstanceId = "$${aws:InstanceId}" }
+            aggregation_dimensions = [[]]
             metrics_collected = {
               ethtool = {
                 interface_include = ["ens5", "eth0"]
