@@ -5,8 +5,8 @@ region: "ref+awsssm://hw/gitops/region"
 image:
   repository: "ref+awsssm://hw/gitops/ecr_repository_url"
   # tag = git commit SHA, digest pins the exact image. CI's image-bump PR rewrites these two lines.
-  tag: "REPLACE_ON_FIRST_PUSH"
-  digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  tag: "28364f1812d2b843dc00c67de8a3bc5370df5dd9"
+  digest: "sha256:0271ab5c4827d852610419352cfd189cf72f26c50ccb868a1e10db2e84a150af"
 
 db:
   host: "ref+awsssm://hw/gitops/db_host"
