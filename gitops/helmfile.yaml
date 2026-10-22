@@ -1,6 +1,8 @@
-# Everything that runs in the cluster. ArgoCD renders one release per Application
-# (`--selector name=<release>`) through the helmfile Config Management Plugin.
-# Values that only Terraform knows (ARNs, IDs) come from SSM /hw/gitops/* via fetchSecretValue.
+# Everything that runs in the cluster. Each app has a folder under apps/<name>/ with its ArgoCD
+# Application (application.yaml) and its Helm values (values.yaml). ArgoCD renders one release per
+# Application (`--selector name=<release>`) through the helmfile Config Management Plugin.
+# Values only Terraform knows (IDs, ARNs) are `ref+awsssm://hw/gitops/...` strings that helmfile
+# resolves at render time.
 
 repositories:
   - name: argo
@@ -9,6 +11,8 @@ repositories:
     url: https://aws.github.io/eks-charts
   - name: external-dns
     url: https://kubernetes-sigs.github.io/external-dns
+  - name: autoscaler
+    url: https://kubernetes.github.io/autoscaler
 
 releases:
   - name: argocd
@@ -16,27 +20,31 @@ releases:
     chart: argo/argo-cd
     version: 10.10.5
     values:
-      - values/argocd.yaml
-      - values/argocd-irsa.yaml.gotmpl
+      - apps/argocd/values.yaml
 
   - name: aws-load-balancer-controller
     namespace: kube-system
     chart: eks/aws-load-balancer-controller
     version: 3.6.1
     values:
-      - values/aws-load-balancer-controller.yaml.gotmpl
+      - apps/aws-load-balancer-controller/values.yaml
 
   - name: external-dns
     namespace: external-dns
     chart: external-dns/external-dns
     version: 1.23.0
     values:
-      - values/external-dns.yaml.gotmpl
+      - apps/external-dns/values.yaml
+
+  - name: cluster-autoscaler
+    namespace: kube-system
+    chart: autoscaler/cluster-autoscaler
+    version: 9.59.0
+    values:
+      - apps/cluster-autoscaler/values.yaml
 
   - name: hello-world
     namespace: hello-world
     chart: ./charts/hello-world
     values:
-      - values/hello-world.yaml.gotmpl
-      # Image tag + digest only; CI opens a PR that rewrites this file.
-      - values/hello-world-image.yaml
+      - apps/hello-world/values.yaml

@@ -1,0 +1,42 @@
+# Values for the cluster-autoscaler Helm release. `ref+awsssm://...` strings are resolved by helmfile (vals)
+# at render time from SSM /hw/gitops/*, which Terraform writes; nothing account-specific is in git.
+# Scales the managed node group's ASG (replaces Karpenter, whose ec2:CreateFleet calls the
+# account SCP denies). Finds ASGs by the k8s.io/cluster-autoscaler/<cluster> tags EKS puts on them.
+autoDiscovery:
+  clusterName: "ref+awsssm://hw/gitops/cluster_name"
+awsRegion: "ref+awsssm://hw/gitops/region"
+
+image:
+  repository: registry.k8s.io/autoscaling/cluster-autoscaler
+  # Must match the Kubernetes minor version (EKS 1.36).
+  tag: v1.36.1@sha256:461388d03eb5b55db58941ee7a81d9a619dd15302b01cbab9f5a9946715994b4
+
+rbac:
+  serviceAccount:
+    create: true
+    # IAM via Pod Identity association (Terraform).
+    name: cluster-autoscaler
+
+extraArgs:
+  expander: least-waste
+  balance-similar-node-groups: true
+  # Scale down quickly; this is a cost-sensitive demo cluster.
+  scale-down-unneeded-time: 5m
+  scale-down-delay-after-add: 5m
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 65534
+  runAsGroup: 65534
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: [ALL]
+
+resources:
+  requests: { cpu: 25m, memory: 64Mi }
+  limits: { cpu: 200m, memory: 256Mi }

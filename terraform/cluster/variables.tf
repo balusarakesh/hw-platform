@@ -7,7 +7,7 @@ variable "aws_profile" {
 variable "region" {
   description = "AWS region."
   type        = string
-  default     = "us-west-2"
+  default     = "us-east-2"
 }
 
 variable "project" {
@@ -17,9 +17,11 @@ variable "project" {
 }
 
 variable "kubernetes_version" {
+  # 1.36, not the newest 1.37: Cluster Autoscaler must match the Kubernetes minor version and
+  # its latest release is v1.36.x. Bump both together.
   description = "EKS Kubernetes version."
   type        = string
-  default     = "1.37"
+  default     = "1.36"
 }
 
 variable "node_instance_type" {

@@ -57,11 +57,9 @@ module "vpc" {
   public_subnet_tags = {
     "kubernetes.io/role/elb" = "1"
   }
-  private_subnet_tags = merge(
-    { "kubernetes.io/role/internal-elb" = "1" },
-    # Karpenter discovers which subnets to launch nodes into by this tag.
-    var.karpenter_discovery_tag == null ? {} : { "karpenter.sh/discovery" = var.karpenter_discovery_tag },
-  )
+  private_subnet_tags = {
+    "kubernetes.io/role/internal-elb" = "1"
+  }
 
   # Lock down the default SG / NACL so nothing accidentally uses them.
   manage_default_security_group  = true

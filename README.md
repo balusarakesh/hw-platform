@@ -5,6 +5,10 @@ IAM database auth, deployed by **ArgoCD + helmfile**, all provisioned with **Ter
 
 > Status: **Phase 1 (baseline)** written and validated locally (not yet applied to AWS). Observability, CI/CD,
 > PR diffs, Atlantis and extras follow in later phases. Known gaps and trade-offs: [docs/GAPS.md](docs/GAPS.md).
+>
+> The AWS account's guardrails (SCPs) shape several choices: region `us-east-2`, **EKS Pod Identity** instead of
+> IRSA, **Cluster Autoscaler** instead of Karpenter, and no GitHub Actions OIDC. See
+> [docs/GAPS.md#account-guardrails-scps-on-the-aws-account](docs/GAPS.md#account-guardrails-scps-on-the-aws-account).
 
 ## Architecture
 
@@ -17,11 +21,11 @@ IAM database auth, deployed by **ArgoCD + helmfile**, all provisioned with **Ter
                     │ pod IPs (target-type ip)
  ┌──────────────────▼─────────────────────────────┐ private subnets
  │ EKS (private + IP-restricted public endpoint)  │
- │  managed node group: 2 × t4g.medium (arm64)    │
- │  ├─ hello-world (2 replicas, IRSA → rds-db:connect as hw_app only)
- │  ├─ db-bootstrap Job (IRSA → read RDS master secret)
- │  ├─ ArgoCD (+ helmfile plugin sidecar, IRSA → read SSM /hw/gitops/*)
- │  ├─ aws-load-balancer-controller, external-dns (IRSA, scoped)
+ │  managed node group: 2–3 × t4g.medium (arm64)  │
+ │  ├─ hello-world (2 replicas, Pod Identity → rds-db:connect as hw_app only)
+ │  ├─ db-bootstrap Job (Pod Identity → read RDS master secret)
+ │  ├─ ArgoCD (+ helmfile plugin sidecar, Pod Identity → read SSM /hw/gitops/*)
+ │  ├─ aws-load-balancer-controller, external-dns, cluster-autoscaler (Pod Identity, scoped)
  └──────────────────┬─────────────────────────────┘
                     │ 5432, TLS (rds.force_ssl), IAM token auth
  ┌──────────────────▼─────────────────┐ isolated database subnets (no internet route)
@@ -34,24 +38,31 @@ IAM database auth, deployed by **ArgoCD + helmfile**, all provisioned with **Ter
 | Path | What |
 |---|---|
 | `app/` | Go app (`serve` + `migrate` subcommands), SQL schema/seed, Dockerfile |
-| `terraform/bootstrap/` | State bucket (KMS, versioned, S3 lockfile), GitHub repo + settings, GitHub OIDC → ECR push role, AWS Budget. Applied from a laptop only |
+| `terraform/bootstrap/` | State bucket (KMS, versioned, S3 lockfile), GitHub repo + settings, AWS Budget ($100, the account's spend limit). Applied from a laptop only |
 | `terraform/persistent/` | VPC, NAT, Aurora, ECR, KMS, ACM cert, SNS alerts topic. Changes rarely |
-| `terraform/cluster/` | EKS, node group, addons, IRSA roles, SSM hand-off params, ArgoCD bootstrap |
+| `terraform/cluster/` | EKS, node group, addons, Pod Identity roles + associations, SSM hand-off params, ArgoCD bootstrap |
 | `terraform/modules/` | Reusable wrappers: `network`, `aurora-serverless`, `ecr-repository` |
-| `gitops/` | `helmfile.yaml`, values, the app chart, and one ArgoCD `Application` per release |
+| `gitops/` | `helmfile.yaml`, the app chart, and `apps/<name>/` per app: `application.yaml` (ArgoCD Application) + `values.yaml` (Helm values) |
 | `scripts/` | `push-image.sh` (first image / manual fallback) |
 | `docs/GAPS.md` | Known gaps, trade-offs and what I'd do next |
 
 ## How the pieces fit
 
 - **Terraform → GitOps hand-off.** Helm values need ARNs/IDs only Terraform knows. The cluster stack writes them to
-  SSM (`/hw/gitops/*`); helmfile reads them at render time with `fetchSecretValue "ref+awsssm://..."`. No account
-  IDs or ARNs are committed.
+  SSM (`/hw/gitops/*`); helmfile resolves `ref+awsssm://...` references in the values files at render time. No
+  account IDs or ARNs are committed.
 - **ArgoCD chicken-and-egg.** Terraform installs ArgoCD and a root `Application` once (`ignore_changes = all`).
-  The root app syncs `gitops/apps/`, where `argocd.yaml` makes ArgoCD manage its own chart from then on.
+  The root app applies every `gitops/apps/*/application.yaml`; `apps/argocd/` makes ArgoCD manage its own chart
+  from then on.
 - **helmfile in ArgoCD.** ArgoCD has no native helmfile support, so a Config Management Plugin sidecar runs
-  `helmfile --selector name=$RELEASE template`. Each `Application` renders exactly one release.
-- **DB access without passwords.** The app's IRSA role allows `rds-db:connect` for one DB user. The app mints a
+  `helmfile --selector name=$RELEASE template`. Each `Application` renders exactly one release. Values that only
+  Terraform knows are written as `ref+awsssm://hw/gitops/...` strings in plain `values.yaml` files; helmfile
+  resolves them (vals) at render time.
+- **Autoscaling.** The app has an HPA (2–6 replicas, CPU 70% / memory 80%, metrics-server addon). Cluster
+  Autoscaler adds nodes (up to 3) when pods don't fit.
+- **IAM for pods.** EKS Pod Identity: each role trusts `pods.eks.amazonaws.com` and is bound to exactly one
+  `namespace/serviceaccount` by an association in Terraform, so charts carry no role ARNs.
+- **DB access without passwords.** The app's Pod Identity role allows `rds-db:connect` for one DB user. The app mints a
   15-minute IAM token per new connection (pgx `BeforeConnect`) and verifies the server cert against the embedded
   RDS CA (`verify-full`). A PreSync Job with a *separate* role reads the RDS-managed master secret to create that
   user (`GRANT rds_iam`), schema and seed rows; it is idempotent and reruns on each sync.
@@ -67,7 +78,7 @@ Prerequisites: Terraform ≥ 1.17, AWS CLI (profile `default`), `gh`, Docker via
    ```
 2. **Bootstrap:** `export GITHUB_TOKEN=$(gh auth token) && make bootstrap`
 3. **Persistent:** `make plan STACK=persistent && make apply STACK=persistent`
-4. **First image:** `colima start --arch aarch64 && make image` (commit the updated `gitops/values/hello-world-image.yaml`), push to `main`
+4. **First image:** `colima start --arch aarch64 && make image` (commit the updated image tag/digest in `gitops/apps/hello-world/values.yaml`), push to `main`
 5. **Cluster:** `make plan STACK=cluster && make apply STACK=cluster`, then `make kubeconfig`
 6. ArgoCD syncs everything; `https://app.test-hw-app.click` serves once the ALB and DNS are up.
 
@@ -77,7 +88,7 @@ ArgoCD UI: `kubectl -n argocd port-forward svc/argocd-server 8443:443` (never ex
 
 | Requirement | How |
 |---|---|
-| Least-privilege IAM, no static creds | One IRSA role per service account, trust pinned to `namespace:serviceaccount`. GitHub Actions uses OIDC (main branch only). No IAM users or access keys are created. |
+| Least-privilege IAM, no static creds | One Pod Identity role per service account, bound to one `namespace/serviceaccount`. No IAM users or access keys are created; GitHub Actions gets no AWS access at all (OIDC is blocked by the account SCP; see GAPS). |
 | Private network | Nodes/pods in private subnets, Aurora in isolated subnets (no internet route), only ALB + NAT public. RDS SG allows 5432 from the node SG only. EKS public endpoint limited to my IP. IMDSv2 hop limit 1. |
 | Encryption at rest | Aurora storage, master secret, ECR, CloudWatch log groups, SNS: CMK `alias/hw-data`. Kubernetes Secrets: EKS envelope encryption (module-created CMK). Node EBS: encrypted gp3. State: SSE-KMS. |
 | Encryption in transit | ALB TLS 1.3/1.2 policy with ACM cert, HTTP → HTTPS redirect, HSTS. App → Aurora TLS `verify-full`, `rds.force_ssl=1`. State bucket denies non-TLS. |

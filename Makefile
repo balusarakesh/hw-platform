@@ -55,4 +55,4 @@ lint: ## fmt/validate/tflint/checkov/helm lint
 	for d in terraform/bootstrap terraform/persistent terraform/cluster; do \
 	  $(TF) -chdir=$$d init -backend=false -input=false >/dev/null && $(TF) -chdir=$$d validate && (cd $$d && tflint); done
 	checkov -d . --config-file .checkov.yaml --compact --quiet
-	helm lint gitops/charts/hello-world --set region=x,image.repository=x,image.tag=x,image.digest=x,serviceAccount.roleArn=x,dbBootstrap.roleArn=x,ingress.host=x,ingress.certificateArn=x
+	helm lint gitops/charts/hello-world --set region=x,image.repository=x,image.tag=x,image.digest=x,ingress.host=x,ingress.certificateArn=x

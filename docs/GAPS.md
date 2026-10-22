@@ -1,6 +1,25 @@
 # hw-platform — Known Gaps & Trade-offs
 
-Each gap lists what was chosen, why, and what the fix would be. The agent keeps this file up to date in the repo as `docs/GAPS.md` and adds new gaps as they come up. The README links to it.
+Each gap lists what was chosen, why, and what the fix would be.
+
+## Account guardrails (SCPs on the AWS account)
+The account is a project account with a **$100/month hard spend limit**, inside an AWS Organization whose
+service control policies cap what even the account's admin can do. Each restriction, and what was built instead:
+
+| Guardrail | Blocked | Used instead | In an unrestricted account |
+|---|---|---|---|
+| Only `us-east-2` allowed | Planned `us-west-2` | `us-east-2` | Any region |
+| All `iam:*OpenIDConnectProvider` denied | **IRSA** (needs the cluster's OIDC issuer registered in IAM) | **EKS Pod Identity**: roles trust `pods.eks.amazonaws.com`; pairing via `aws_eks_pod_identity_association` | Either works; Pod Identity is AWS's current recommendation anyway |
+| (same) | **GitHub Actions OIDC → AWS role** for pushing images to ECR | Phase 1: push from the laptop (`make image`). Phase 3: build on a GitHub-hosted runner, push from an in-cluster runner with a Pod Identity role scoped to the one ECR repo | GitHub OIDC provider + role trusted only for `repo:balusarakesh/hw-platform:ref:refs/heads/main` (no runner in the cluster needed) |
+| `ec2:CreateFleet` denied | **Karpenter** (and EKS Auto Mode) launch nodes with CreateFleet | **Cluster Autoscaler** scaling the managed node group's ASG | Karpenter: faster, bin-packing, mixed instance types and Spot |
+| $100/month spend limit | Running everything 24/7 (~$135/month idle) | Power-off script, budget alerts at $50/$75/$90 | Normal budget alerts |
+
+- **GitHub Actions has no AWS identity.** Because of the OIDC guardrail, nothing running on GitHub's
+  infrastructure can authenticate to AWS without static keys, which the baseline forbids. Anything that needs
+  AWS (ECR push) has to run in-cluster with Pod Identity, which widens what in-cluster runners can do.
+  *Fix:* allow the GitHub OIDC provider; then CI pushes directly and in-cluster runners stay read-only.
+- **EKS is on 1.36, not the newest 1.37.** Cluster Autoscaler releases track Kubernetes minors and the
+  newest CA is v1.36.x. *Fix:* bump EKS and CA together when CA 1.37 ships (or Karpenter, which doesn't have this coupling).
 
 ## Repository & GitOps
 - **Single monorepo** instead of separate `hw-app`, `hw-terraform`, `hw-terraform-modules` and `hw-gitops` repos.
@@ -28,7 +47,7 @@ Each gap lists what was chosen, why, and what the fix would be. The agent keeps 
   - *Fix:* use the GitHub App manifest flow to make it one click; there is no full automation.
 - **The GitHub App private key is a long-lived credential.** It isn't an AWS credential. It's stored in Secrets Manager and synced via ESO, and rotation is manual.
   - *Fix:* scheduled rotation plus alerting on key age.
-- **Domain registration is outside Terraform** (billable, needs contact details). Terraform imports the auto-created hosted zone.
+- **Domain registration is outside Terraform** (billable, needs contact details). Terraform looks up the auto-created hosted zone instead of managing it, so a destroy can never remove it.
 - **The SNS email subscription** must be confirmed by hand.
 - **`/hw/admin_cidrs` (home IP)** is set by hand and must be updated when the home IP changes.
 
@@ -46,7 +65,7 @@ Each gap lists what was chosen, why, and what the fix would be. The agent keeps 
 - **Single NAT gateway.** Losing that AZ breaks egress for both AZs. *Fix:* one NAT per AZ.
 - **Single Aurora writer, no reader.** Failover means recreating the instance, which takes minutes. *Fix:* add a reader in the second AZ.
 - **Aurora `min_capacity = 0` (auto-pause).** The first request after idle waits about 15 s while the DB resumes. `/readyz` deliberately doesn't fail on a paused DB.
-- **2 small nodes.** There's limited headroom, and a node failure squeezes all the addons. Karpenter helps with the app only.
+- **2 small nodes, one instance type.** Limited headroom; Cluster Autoscaler can add up to 3 nodes of the same type, but a node failure still squeezes the addons until a replacement joins (minutes).
 - **Backups are configured but restores have never been tested.** *Fix:* a periodic restore drill.
 - **No SLOs or error budgets.** Alarms are threshold-based. *Fix:* define availability and latency SLOs with burn-rate alerts.
 - **No multi-environment setup** (dev/stage/prod). *Fix:* workspaces or per-env stacks, plus ArgoCD ApplicationSets.
@@ -68,9 +87,8 @@ Each gap lists what was chosen, why, and what the fix would be. The agent keeps 
   - *Fix:* AMP + a PromQL alert on p90.
 - **Node alarms are cluster-wide ("worst node"), not per node.** Nodes come and go, so per-instance alarms would break. The alarm says *a* node is affected, and the dashboard shows which one.
   - *Fix:* CloudWatch multi-time-series (Metrics Insights `GROUP BY`) alarms, or Prometheus alerting with per-node labels.
-- **The EC2 status-check alarm queries every instance in the account.**
-  - *Why:* Karpenter nodes aren't in an ASG. This assumes the account is dedicated to this project.
-  - *Fix:* filter by cluster tag, or alert on Karpenter/node-repair events instead.
+- **The EC2 status-check alarm aggregates over the node group's ASG.** It says *a* node failed; node auto repair
+  replaces it. *Fix:* per-instance alarms created by an EventBridge rule on instance launch.
 - **AWS-managed addon pods may run as root.** Fluent Bit and possibly the CloudWatch agent come from the CloudWatch observability addon. These are the only exceptions to the non-root baseline, listed per container in the README.
   - *Fix:* self-manage them with non-root settings where the tool allows it.
 - **node-exporter uses host namespaces** (hostNetwork, hostPID, read-only `/proc` and `/sys`), while running as non-root and unprivileged with no capabilities. It can *see* node-level information.

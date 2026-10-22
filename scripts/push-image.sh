@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build the app for linux/arm64, push it to ECR tagged with the current commit, and pin
-# tag + digest in gitops/values/hello-world-image.yaml. Used for the very first image
+# tag + digest in gitops/apps/hello-world/values.yaml. Used for the very first image
 # (before CI exists) and as a manual fallback; CI does the same thing on merge to main.
 set -euo pipefail
 
@@ -24,11 +24,11 @@ docker buildx build --platform linux/arm64 --provenance=false \
 
 digest="$(crane digest "$repo:$tag")"
 
-cat > gitops/values/hello-world-image.yaml <<EOF
-# Rewritten by CI (image-bump PR) after every merge to app/. Tag = git commit SHA.
-image:
-  tag: "$tag"
-  digest: "$digest"
-EOF
+values=gitops/apps/hello-world/values.yaml
+# Only the two indented image lines change; everything else in the file is left alone.
+sed -i.bak -E \
+  -e "s|^(  tag: ).*|\\1\"$tag\"|" \
+  -e "s|^(  digest: ).*|\\1\"$digest\"|" \
+  "$values" && rm -f "$values.bak"
 
 echo "pushed $repo:$tag@$digest"

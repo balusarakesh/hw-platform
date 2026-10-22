@@ -73,13 +73,10 @@ repoServer:
     requests: { cpu: 50m, memory: 128Mi }
     limits: { cpu: 500m, memory: 512Mi }
 
+  # Pod Identity association (Terraform) gives this SA read access to SSM /hw/gitops/*.
   serviceAccount:
     create: true
     name: argocd-repo-server
-    # IRSA role for reading /hw/gitops/* from SSM. Bootstrap: set by Terraform.
-    # Self-managed: values/argocd-irsa.yaml.gotmpl fills it in.
-    annotations:
-      eks.amazonaws.com/role-arn: ""
 
   volumes:
     - name: helmfile-plugin-config
@@ -94,7 +91,7 @@ repoServer:
       # The ArgoCD-provided cmp-server binary (shared via var-files) serves the plugin.
       command: [/var/run/argocd/argocd-cmp-server]
       env:
-        - { name: AWS_REGION, value: us-west-2 }
+        - { name: AWS_REGION, value: us-east-2 }
         - { name: HOME, value: /tmp/helmfile }
         - { name: HELM_CACHE_HOME, value: /tmp/helmfile/cache }
         - { name: HELM_CONFIG_HOME, value: /tmp/helmfile/config }

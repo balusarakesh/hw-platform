@@ -12,3 +12,5 @@ skip-check:
   - CKV_TF_1
   # We deliberately take the first N AZs of the region; adding AZs doesn't change the slice.
   - CKV_AWS_394
+  # Distroless image has no shell for a Docker HEALTHCHECK; Kubernetes probes do this job.
+  - CKV_DOCKER_2

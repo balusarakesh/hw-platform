@@ -1,5 +1,6 @@
 # The public monorepo and its security settings, managed as code.
 # Things the provider cannot do (creating a GitHub App, fork-PR workflow approval) are in docs/GAPS.md.
+# No GitHub OIDC -> AWS role: the account SCP denies IAM OIDC providers (docs/GAPS.md).
 
 resource "github_repository" "this" {
   name        = var.github_repo
@@ -78,4 +79,11 @@ resource "github_repository_ruleset" "main" {
       dismiss_stale_reviews_on_push   = true
     }
   }
+}
+
+# Region isn't secret; workflows read it from here instead of hard-coding it.
+resource "github_actions_variable" "aws_region" {
+  repository    = github_repository.this.name
+  variable_name = "AWS_REGION"
+  value         = var.region
 }

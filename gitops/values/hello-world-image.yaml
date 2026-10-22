@@ -1,4 +1,0 @@
-# Rewritten by CI (image-bump PR) after every merge to app/. Tag = git commit SHA.
-image:
-  tag: "REPLACE_ON_FIRST_PUSH"
-  digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000"

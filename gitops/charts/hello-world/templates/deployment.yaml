@@ -5,7 +5,10 @@ metadata:
   labels:
     {{- include "hello-world.labels" . | nindent 4 }}
 spec:
+  {{- if not .Values.hpa.enabled }}
+  # With the HPA on, replicas is left unset so ArgoCD doesn't fight the autoscaler.
   replicas: {{ .Values.replicas }}
+  {{- end }}
   revisionHistoryLimit: 3
   strategy:
     rollingUpdate:

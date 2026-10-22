@@ -1,4 +1,0 @@
-repoServer:
-  serviceAccount:
-    annotations:
-      eks.amazonaws.com/role-arn: {{ fetchSecretValue "ref+awsssm://hw/gitops/role_argocd_repo_server" | quote }}

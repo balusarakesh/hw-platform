@@ -7,7 +7,7 @@ variable "aws_profile" {
 variable "region" {
   description = "AWS region for every regional resource in this project."
   type        = string
-  default     = "us-west-2"
+  default     = "us-east-2"
 }
 
 variable "project" {
@@ -29,7 +29,7 @@ variable "github_repo" {
 }
 
 variable "monthly_budget_usd" {
-  description = "Monthly AWS Budget; alerts go to the email stored in SSM /hw/alert_email."
+  description = "Monthly AWS Budget (matches the account's hard spend limit); alerts go to SSM /hw/alert_email."
   type        = number
-  default     = 150
+  default     = 100
 }

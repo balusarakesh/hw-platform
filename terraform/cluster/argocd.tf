@@ -1,5 +1,5 @@
 # Chicken-and-egg breaker: Terraform installs ArgoCD once, plus a single root Application.
-# From then on ArgoCD owns everything in gitops/, including its own chart (gitops/apps/argocd.yaml),
+# From then on ArgoCD owns everything in gitops/, including its own chart (gitops/apps/argocd/),
 # so Terraform ignores later changes to these two releases.
 
 resource "helm_release" "argocd" {
@@ -11,19 +11,13 @@ resource "helm_release" "argocd" {
   version          = var.argocd_chart_version
 
   # Same values ArgoCD uses to manage itself, so the hand-over is a no-op.
-  values = [file("${path.module}/../../gitops/values/argocd.yaml")]
-
-  # The one value the gitops side resolves from SSM.
-  set = [{
-    name  = "repoServer.serviceAccount.annotations.eks\\.amazonaws\\.com/role-arn"
-    value = module.irsa_argocd_repo_server.arn
-  }]
+  values = [file("${path.module}/../../gitops/apps/argocd/values.yaml")]
 
   lifecycle {
     ignore_changes = all
   }
 
-  depends_on = [module.eks, aws_ssm_parameter.gitops]
+  depends_on = [module.eks, aws_ssm_parameter.gitops, module.pod_identity_argocd_repo_server]
 }
 
 resource "helm_release" "argocd_root_app" {
@@ -43,6 +37,12 @@ resource "helm_release" "argocd_root_app" {
           repoURL        = var.github_repo_url
           targetRevision = "main"
           path           = "gitops/apps"
+          # Each apps/<name>/ folder holds application.yaml (a manifest) and values.yaml (Helm values,
+          # read by helmfile). Only the Application manifests are applied.
+          directory = {
+            recurse = true
+            include = "*/application.yaml"
+          }
         }
         destination = {
           server    = "https://kubernetes.default.svc"

@@ -31,12 +31,6 @@ variable "single_nat_gateway" {
   default     = true
 }
 
-variable "karpenter_discovery_tag" {
-  description = "Value for the karpenter.sh/discovery tag on private subnets; null to skip."
-  type        = string
-  default     = null
-}
-
 variable "log_retention_days" {
   description = "Retention for the VPC flow log group."
   type        = number

@@ -1,6 +1,8 @@
-clusterName: {{ fetchSecretValue "ref+awsssm://hw/gitops/cluster_name" | quote }}
-region: {{ fetchSecretValue "ref+awsssm://hw/gitops/region" | quote }}
-vpcId: {{ fetchSecretValue "ref+awsssm://hw/gitops/vpc_id" | quote }}
+# Values for the aws-load-balancer-controller Helm release. `ref+awsssm://...` strings are resolved by helmfile (vals)
+# at render time from SSM /hw/gitops/*, which Terraform writes; nothing account-specific is in git.
+clusterName: "ref+awsssm://hw/gitops/cluster_name"
+region: "ref+awsssm://hw/gitops/region"
+vpcId: "ref+awsssm://hw/gitops/vpc_id"
 
 image:
   repository: public.ecr.aws/eks/aws-load-balancer-controller
@@ -10,9 +12,8 @@ replicaCount: 1
 
 serviceAccount:
   create: true
+  # IAM via Pod Identity association (Terraform), no annotation needed.
   name: aws-load-balancer-controller
-  annotations:
-    eks.amazonaws.com/role-arn: {{ fetchSecretValue "ref+awsssm://hw/gitops/role_lb_controller" | quote }}
 
 # Only reconcile Ingresses/Services we explicitly hand to it; don't hijack every type=LoadBalancer.
 enableServiceMutatorWebhook: false

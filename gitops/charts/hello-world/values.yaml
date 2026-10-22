@@ -1,4 +1,4 @@
-# Defaults only; environment-specific values come from gitops/values/hello-world*.
+# Defaults only; environment-specific values come from gitops/apps/hello-world/values.yaml.
 
 region: ""
 
@@ -8,11 +8,19 @@ image:
   # Always deploy by digest; the tag is there for humans.
   digest: ""
 
+# Used only when the HPA is disabled.
 replicas: 2
 
+hpa:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+# IAM comes from EKS Pod Identity associations keyed on these SA names (terraform/cluster/pod_identity.tf).
 serviceAccount:
   name: hello-world
-  roleArn: ""
 
 db:
   host: ""
@@ -23,7 +31,6 @@ db:
 dbBootstrap:
   enabled: true
   serviceAccountName: hello-world-db-bootstrap
-  roleArn: ""
   masterUsername: ""
   masterSecretArn: ""
 

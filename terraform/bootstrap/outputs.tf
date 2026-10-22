@@ -18,10 +18,6 @@ output "backend_hcl" {
   EOT
 }
 
-output "github_ecr_push_role_arn" {
-  value = aws_iam_role.github_ecr_push.arn
-}
-
 output "repo_url" {
   value = github_repository.this.html_url
 }

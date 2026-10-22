@@ -37,8 +37,8 @@ module "eks" {
   cloudwatch_log_group_retention_in_days = var.log_retention_days
   cloudwatch_log_group_kms_key_id        = local.p.data_kms_key_arn
 
-  # IRSA: the module registers the cluster's OIDC issuer with IAM.
-  enable_irsa = true
+  # No IRSA: it needs an IAM OIDC provider, which the account's SCP denies. Pod Identity instead.
+  enable_irsa = false
 
   addons = {
     vpc-cni = {
@@ -53,8 +53,14 @@ module "eks" {
         enableNetworkPolicy = "true"
       })
     }
+    # Node agent that hands pods their IAM credentials (Pod Identity).
+    eks-pod-identity-agent = {
+      before_compute = true
+    }
     coredns    = {}
     kube-proxy = {}
+    # Resource metrics API (CPU/memory) that the HorizontalPodAutoscaler reads.
+    metrics-server = {}
     # Detects node health issues (kernel, network, runtime) and feeds node auto repair.
     eks-node-monitoring-agent = {}
   }
@@ -64,7 +70,8 @@ module "eks" {
       ami_type       = "AL2023_ARM_64_STANDARD"
       instance_types = [var.node_instance_type]
 
-      # min 0 lets power.py scale to zero; the module ignores desired_size drift.
+      # min 0 lets power.py scale to zero; Cluster Autoscaler moves between 1..max while running.
+      # The module ignores desired_size drift, so neither fights Terraform.
       min_size     = 0
       max_size     = 3
       desired_size = var.node_desired_size
@@ -100,11 +107,6 @@ module "eks" {
         role = "general"
       }
     }
-  }
-
-  # Karpenter will look for this tag on the node SG (subnets are tagged in the network module).
-  node_security_group_tags = {
-    "karpenter.sh/discovery" = var.project
   }
 }
 
