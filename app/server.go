@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"net"
 	"net/http"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -60,7 +62,7 @@ func (a *app) routes() http.Handler {
 	mux.HandleFunc("GET /api/items", a.handleItems)
 	mux.HandleFunc("GET /healthz", a.handleHealthz)
 	mux.HandleFunc("GET /readyz", a.handleReadyz)
-	return securityHeaders(instrument(mux))
+	return securityHeaders(accessLog(instrument(mux)))
 }
 
 func (a *app) handleIndex(w http.ResponseWriter, _ *http.Request) {
@@ -105,6 +107,43 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+// accessLog writes one JSON line per request to stdout (Fluent Bit ships it to CloudWatch Logs).
+// Probe endpoints are skipped: kubelet and the ALB hit them every few seconds and would drown out
+// real traffic. The client IP comes from X-Forwarded-For, which the ALB sets.
+func accessLog(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/healthz" || r.URL.Path == "/readyz" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		start := time.Now()
+		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(rec, r)
+		slog.Info("request",
+			"method", r.Method,
+			"path", r.URL.Path,
+			"route", r.Pattern,
+			"status", rec.status,
+			"duration_ms", time.Since(start).Milliseconds(),
+			"client_ip", clientIP(r),
+			"user_agent", r.UserAgent(),
+		)
+	})
+}
+
+// clientIP returns the original client address: the first X-Forwarded-For hop when behind the ALB.
+func clientIP(r *http.Request) string {
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		ip, _, _ := strings.Cut(xff, ",")
+		return strings.TrimSpace(ip)
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
 }
 
 func securityHeaders(next http.Handler) http.Handler {

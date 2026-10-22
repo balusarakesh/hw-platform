@@ -1,6 +1,7 @@
 # Values for the node-exporter Helm release (prometheus-community/prometheus-node-exporter).
 # Only exists to feed the node network alarms: Linux conntrack table usage and the ENA
-# "allowance exceeded" counters (ethtool). Everything else is disabled to keep CloudWatch cost down.
+# (ENA allowance counters come from the CloudWatch agent's ethtool plugin instead:
+# node-exporter publishes them as untyped metrics, which the agent drops). Everything else is disabled to keep CloudWatch cost down.
 # Scraped by the CloudWatch agent (cloudwatch-agent-prometheus); not exposed outside the cluster.
 
 image:
@@ -35,10 +36,6 @@ extraArgs:
   - --collector.disable-defaults
   # node_nf_conntrack_entries / node_nf_conntrack_entries_limit
   - --collector.conntrack
-  # node_ethtool_<stat>: ENA driver counters, only the allowance ones
-  - --collector.ethtool
-  - --collector.ethtool.device-include=^(eth|ens).*
-  - --collector.ethtool.metrics-include=^(bw_in_allowance_exceeded|bw_out_allowance_exceeded|pps_allowance_exceeded|conntrack_allowance_exceeded|conntrack_allowance_available|linklocal_allowance_exceeded)$
 
 service:
   enabled: true

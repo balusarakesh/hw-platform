@@ -1,16 +1,15 @@
 # Pod, HPA and control-plane alarms.
 #
 # Container Insights (enhanced observability) metrics are published with a [ClusterName] dimension set,
-# so one alarm covers every namespace. Names below follow the Container Insights enhanced observability
-# docs; TODO-verify against `aws cloudwatch list-metrics --namespace ContainerInsights` once the cluster
-# is up (they can differ between agent versions).
+# so one alarm covers every namespace. Names verified with `aws cloudwatch list-metrics` on the live
+# cluster; the crash-loop metric only appears once a container has crash-looped.
 
 locals {
   ci_cluster = { ClusterName = local.cluster_name }
 
   pod_alarms = {
     unavailable = {
-      metric      = "kube_deployment_status_replicas_unavailable"
+      metric      = "status_replicas_unavailable"
       minutes     = 5
       description = "A Deployment has had unavailable replicas for 5 minutes. Check first: `kubectl get deploy -A`, `kubectl describe pod` events (image pull, probes, OOM)."
     }
@@ -107,7 +106,7 @@ resource "aws_cloudwatch_metric_alarm" "hpa_at_max" {
 
 # EKS publishes control-plane metrics to AWS/EKS for free (no scraping). Only P99 is vended, so
 # "p90 > 3s" is implemented as P99 > 3s (P99 >= p90, so this fires whenever p90 would) - see GAPS.
-# TODO-verify metric names with `aws cloudwatch list-metrics --namespace AWS/EKS` once the cluster exists.
+# Metric names verified with `aws cloudwatch list-metrics --namespace AWS/EKS` on the live cluster.
 locals {
   apiserver_verbs = ["GET", "LIST", "POST", "PUT", "PATCH", "DELETE"]
 }

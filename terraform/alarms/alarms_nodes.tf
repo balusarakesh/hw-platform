@@ -130,17 +130,18 @@ resource "aws_cloudwatch_metric_alarm" "node_conntrack_table" {
   ok_actions    = local.actions
 }
 
-# ENA driver counters: packets queued or dropped because the instance exceeded an EC2 network
-# allowance. Any increase is worth knowing about.
-# TODO-verify: whether the CloudWatch agent publishes Prometheus counters as per-scrape deltas
-# (assumed here: Sum > 0) or cumulative totals (then switch to RATE()/DIFF() metric math).
+# ENA driver counters: packets queued or dropped because an instance exceeded an EC2 network
+# allowance. Published by the CloudWatch agent's ethtool plugin (namespace hw/ENA) as cumulative
+# counters, aggregated across nodes (no dimensions). The alarm fires on the per-minute increase
+# (DIFF of the cluster-wide Sum). Not "any increase": burstable t4g nodes exceed their allowances
+# briefly during image pulls, which isn't worth a page.
 locals {
   ena_allowances = {
-    bw-in      = { metric = "node_ethtool_bw_in_allowance_exceeded", what = "inbound bandwidth" }
-    bw-out     = { metric = "node_ethtool_bw_out_allowance_exceeded", what = "outbound bandwidth" }
-    pps        = { metric = "node_ethtool_pps_allowance_exceeded", what = "packets per second" }
-    conntrack  = { metric = "node_ethtool_conntrack_allowance_exceeded", what = "tracked connections" }
-    link-local = { metric = "node_ethtool_linklocal_allowance_exceeded", what = "link-local (DNS/IMDS/NTP) packets per second" }
+    bw-in      = { metric = "ethtool_bw_in_allowance_exceeded", what = "inbound bandwidth" }
+    bw-out     = { metric = "ethtool_bw_out_allowance_exceeded", what = "outbound bandwidth" }
+    pps        = { metric = "ethtool_pps_allowance_exceeded", what = "packets per second" }
+    conntrack  = { metric = "ethtool_conntrack_allowance_exceeded", what = "tracked connections" }
+    link-local = { metric = "ethtool_linklocal_allowance_exceeded", what = "link-local (DNS/IMDS/NTP) packets per second" }
   }
 }
 
@@ -148,18 +149,30 @@ resource "aws_cloudwatch_metric_alarm" "ena_allowance_exceeded" {
   for_each = local.ena_allowances
 
   alarm_name        = "hw-nodes-ena-${each.key}-exceeded"
-  alarm_description = "A node exceeded its EC2 ${each.value.what} allowance in the last 5 minutes (packets were queued or dropped). Check first: per-node ENA counters on hw-overview; fix is a bigger instance type or spreading traffic."
-
-  namespace   = "hw/Prometheus"
-  metric_name = each.value.metric
-  dimensions  = { ClusterName = local.cluster_name }
-  statistic   = "Sum"
-  period      = 300
+  alarm_description = "Nodes have been exceeding their EC2 ${each.value.what} allowance (more than ${var.ena_exceeded_per_minute} packets/min queued or dropped, 3 of the last 5 minutes). Check first: ENA panel on hw-overview (which instance), then traffic per pod; fix is a bigger instance type or spreading traffic."
 
   comparison_operator = "GreaterThanThreshold"
-  threshold           = 0
-  evaluation_periods  = 1
+  threshold           = var.ena_exceeded_per_minute
+  evaluation_periods  = 5
+  datapoints_to_alarm = 3
   treat_missing_data  = "notBreaching"
+
+  metric_query {
+    id          = "increase"
+    expression  = "DIFF(total)"
+    label       = "${each.value.metric} per minute (cluster)"
+    return_data = true
+  }
+
+  metric_query {
+    id = "total"
+    metric {
+      namespace   = "hw/ENA"
+      metric_name = each.value.metric
+      stat        = "Sum"
+      period      = 60
+    }
+  }
 
   alarm_actions = local.actions
   ok_actions    = local.actions
@@ -169,9 +182,8 @@ resource "aws_cloudwatch_metric_alarm" "ena_conntrack_allowance_low" {
   alarm_name        = "hw-nodes-ena-conntrack-allowance-low"
   alarm_description = "A node has fewer than ${var.conntrack_allowance_min_available} tracked connections left before hitting the EC2 conntrack allowance. Check first: connection counts per pod, idle-timeout settings, instance size."
 
-  namespace   = "hw/Prometheus"
-  metric_name = "node_ethtool_conntrack_allowance_available"
-  dimensions  = { ClusterName = local.cluster_name }
+  namespace   = "hw/ENA"
+  metric_name = "ethtool_conntrack_allowance_available"
   statistic   = "Minimum"
   period      = 60
 

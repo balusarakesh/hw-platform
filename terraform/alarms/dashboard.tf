@@ -7,11 +7,6 @@ locals {
 
   per_node = { for m in [
     "node_nf_conntrack_entries",
-    "node_ethtool_bw_in_allowance_exceeded",
-    "node_ethtool_bw_out_allowance_exceeded",
-    "node_ethtool_pps_allowance_exceeded",
-    "node_ethtool_conntrack_allowance_exceeded",
-    "node_ethtool_linklocal_allowance_exceeded",
     ] : m => "SEARCH('{hw/Prometheus,ClusterName,NodeName} ClusterName=\"${local.cn}\" MetricName=\"${m}\"', 'Maximum', 60)"
   }
 
@@ -137,14 +132,14 @@ locals {
     {
       type = "metric", x = 16, y = 22, width = 8, height = 6
       properties = {
-        title = "ENA allowance exceeded per node", region = var.region, period = 60
+        title = "ENA allowance exceeded per instance (packets/min)", region = var.region, period = 60
         metrics = [for i, m in [
-          "node_ethtool_bw_in_allowance_exceeded",
-          "node_ethtool_bw_out_allowance_exceeded",
-          "node_ethtool_pps_allowance_exceeded",
-          "node_ethtool_conntrack_allowance_exceeded",
-          "node_ethtool_linklocal_allowance_exceeded",
-        ] : [{ expression = local.per_node[m], id = "ena${i}" }]]
+          "ethtool_bw_in_allowance_exceeded",
+          "ethtool_bw_out_allowance_exceeded",
+          "ethtool_pps_allowance_exceeded",
+          "ethtool_conntrack_allowance_exceeded",
+          "ethtool_linklocal_allowance_exceeded",
+        ] : [{ expression = "DIFF(SEARCH('{hw/ENA,InstanceId,driver,interface} MetricName=\"${m}\"', 'Maximum', 60))", id = "ena${i}" }]]
       }
     },
     {

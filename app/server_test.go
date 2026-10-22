@@ -76,3 +76,16 @@ func TestQuoteLiteral(t *testing.T) {
 		t.Fatalf("got %s", got)
 	}
 }
+
+func TestClientIPPrefersFirstForwardedHop(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.Header.Set("X-Forwarded-For", "203.0.113.7, 10.20.0.5")
+	if got := clientIP(r); got != "203.0.113.7" {
+		t.Fatalf("got %s", got)
+	}
+	r.Header.Del("X-Forwarded-For")
+	r.RemoteAddr = "10.20.1.2:5555"
+	if got := clientIP(r); got != "10.20.1.2" {
+		t.Fatalf("got %s", got)
+	}
+}
