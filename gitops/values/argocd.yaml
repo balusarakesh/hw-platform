@@ -1,0 +1,118 @@
+# ArgoCD itself. Used twice: by Terraform for the one-time bootstrap (cluster/argocd.tf)
+# and by ArgoCD to manage itself afterwards (apps/argocd.yaml), so keep it plain YAML (no templating).
+
+global:
+  image:
+    repository: quay.io/argoproj/argocd
+    # tag@digest: the tag documents the version, the digest is what actually gets pulled.
+    tag: v3.5.5@sha256:13db7b10db23283b1b36f855046602e18539a8a8204c9f6f039e8896c8897518
+  # All ArgoCD pods prefer spreading across nodes.
+  affinity:
+    podAntiAffinity: soft
+
+configs:
+  cm:
+    # Fewer polls; the repo is small and changes are rare.
+    timeout.reconciliation: 180s
+    # No `kubectl exec` from the UI.
+    exec.enabled: "false"
+  params:
+    # UI/API is only reachable via `kubectl port-forward`, never an Ingress.
+    server.insecure: "false"
+
+  # Config Management Plugin: ArgoCD has no native helmfile support, so a sidecar renders
+  # `helmfile template` for one release (selected by the Application's RELEASE env).
+  cmp:
+    create: true
+    plugins:
+      helmfile:
+        allowConcurrency: true
+        lockRepo: false
+        discover:
+          fileName: helmfile.yaml
+        generate:
+          command: [sh, -c]
+          args:
+            - >-
+              helmfile --file helmfile.yaml
+              --selector name="$ARGOCD_ENV_RELEASE"
+              template --include-crds --skip-tests --quiet
+              --args "--kube-version=$KUBE_VERSION"
+
+dex:
+  enabled: false
+
+notifications:
+  enabled: false
+
+redis:
+  image:
+    repository: ecr-public.aws.com/docker/library/redis
+    tag: 8.6.4-alpine@sha256:2cc044fc5a07c9b701f8f1255a309ae9ad7856e694ac03513bf3648c01e40763
+  resources:
+    requests: { cpu: 25m, memory: 32Mi }
+    limits: { cpu: 200m, memory: 128Mi }
+
+controller:
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { cpu: "1", memory: 768Mi }
+
+server:
+  resources:
+    requests: { cpu: 25m, memory: 64Mi }
+    limits: { cpu: 300m, memory: 256Mi }
+
+applicationSet:
+  resources:
+    requests: { cpu: 10m, memory: 32Mi }
+    limits: { cpu: 200m, memory: 128Mi }
+
+repoServer:
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { cpu: 500m, memory: 512Mi }
+
+  serviceAccount:
+    create: true
+    name: argocd-repo-server
+    # IRSA role for reading /hw/gitops/* from SSM. Bootstrap: set by Terraform.
+    # Self-managed: values/argocd-irsa.yaml.gotmpl fills it in.
+    annotations:
+      eks.amazonaws.com/role-arn: ""
+
+  volumes:
+    - name: helmfile-plugin-config
+      configMap:
+        name: argocd-cmp-cm
+    - name: helmfile-tmp
+      emptyDir: {}
+
+  extraContainers:
+    - name: helmfile-plugin
+      image: ghcr.io/helmfile/helmfile:v1.8.2@sha256:5dbdc37016c7e286d4a1a64ac1e360cee79590df2949891823bf73618003381b
+      # The ArgoCD-provided cmp-server binary (shared via var-files) serves the plugin.
+      command: [/var/run/argocd/argocd-cmp-server]
+      env:
+        - { name: AWS_REGION, value: us-west-2 }
+        - { name: HOME, value: /tmp/helmfile }
+        - { name: HELM_CACHE_HOME, value: /tmp/helmfile/cache }
+        - { name: HELM_CONFIG_HOME, value: /tmp/helmfile/config }
+        - { name: HELM_DATA_HOME, value: /tmp/helmfile/data }
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: [ALL]
+        seccompProfile:
+          type: RuntimeDefault
+      resources:
+        requests: { cpu: 50m, memory: 128Mi }
+        limits: { cpu: 500m, memory: 512Mi }
+      volumeMounts:
+        - { name: var-files, mountPath: /var/run/argocd }
+        - { name: plugins, mountPath: /home/argocd/cmp-server/plugins }
+        - { name: helmfile-plugin-config, mountPath: /home/argocd/cmp-server/config/plugin.yaml, subPath: helmfile.yaml }
+        - { name: helmfile-tmp, mountPath: /tmp }

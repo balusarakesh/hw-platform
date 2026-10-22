@@ -1,0 +1,38 @@
+# Defaults only; environment-specific values come from gitops/values/hello-world*.
+
+region: ""
+
+image:
+  repository: ""
+  tag: ""
+  # Always deploy by digest; the tag is there for humans.
+  digest: ""
+
+replicas: 2
+
+serviceAccount:
+  name: hello-world
+  roleArn: ""
+
+db:
+  host: ""
+  port: "5432"
+  name: ""
+  user: hw_app
+
+dbBootstrap:
+  enabled: true
+  serviceAccountName: hello-world-db-bootstrap
+  roleArn: ""
+  masterUsername: ""
+  masterSecretArn: ""
+
+ingress:
+  host: ""
+  certificateArn: ""
+  # Fixed IngressGroup: every Ingress in the group shares one ALB whose name/tags stay stable.
+  groupName: hw
+
+resources:
+  requests: { cpu: 25m, memory: 32Mi }
+  limits: { cpu: 250m, memory: 128Mi }

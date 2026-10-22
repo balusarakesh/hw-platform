@@ -1,0 +1,35 @@
+# Terraform: state, plans, local overrides and per-account config never go to git.
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan
+crash.log
+crash.*.log
+*.tfvars
+*.tfvars.json
+*_override.tf
+*_override.tf.json
+terraform/backend.hcl
+.terraformrc
+terraform.rc
+
+# Secrets / credentials, belt and braces
+.env
+.env.*
+*.pem
+*.key
+kubeconfig*
+
+# Go
+app/bin/
+app/coverage.out
+
+# Python
+scripts/.venv/
+__pycache__/
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/

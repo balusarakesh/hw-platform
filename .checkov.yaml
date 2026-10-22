@@ -1,0 +1,14 @@
+# Repo-wide Checkov exceptions. Each one is deliberate and documented in README "Security exceptions".
+framework:
+  - terraform
+  - kubernetes
+  - dockerfile
+  - github_actions
+skip-check:
+  # The assignment requires a public repository.
+  - CKV_GIT_1
+  # Registry modules are pinned to exact versions (version = "x.y.z") and providers via
+  # .terraform.lock.hcl; commit-hash pinning only applies to git module sources.
+  - CKV_TF_1
+  # We deliberately take the first N AZs of the region; adding AZs doesn't change the slice.
+  - CKV_AWS_394

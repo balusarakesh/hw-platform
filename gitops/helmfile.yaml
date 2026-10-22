@@ -1,0 +1,42 @@
+# Everything that runs in the cluster. ArgoCD renders one release per Application
+# (`--selector name=<release>`) through the helmfile Config Management Plugin.
+# Values that only Terraform knows (ARNs, IDs) come from SSM /hw/gitops/* via fetchSecretValue.
+
+repositories:
+  - name: argo
+    url: https://argoproj.github.io/argo-helm
+  - name: eks
+    url: https://aws.github.io/eks-charts
+  - name: external-dns
+    url: https://kubernetes-sigs.github.io/external-dns
+
+releases:
+  - name: argocd
+    namespace: argocd
+    chart: argo/argo-cd
+    version: 10.10.5
+    values:
+      - values/argocd.yaml
+      - values/argocd-irsa.yaml.gotmpl
+
+  - name: aws-load-balancer-controller
+    namespace: kube-system
+    chart: eks/aws-load-balancer-controller
+    version: 3.6.1
+    values:
+      - values/aws-load-balancer-controller.yaml.gotmpl
+
+  - name: external-dns
+    namespace: external-dns
+    chart: external-dns/external-dns
+    version: 1.23.0
+    values:
+      - values/external-dns.yaml.gotmpl
+
+  - name: hello-world
+    namespace: hello-world
+    chart: ./charts/hello-world
+    values:
+      - values/hello-world.yaml.gotmpl
+      # Image tag + digest only; CI opens a PR that rewrites this file.
+      - values/hello-world-image.yaml

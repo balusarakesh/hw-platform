@@ -1,0 +1,32 @@
+image:
+  repository: registry.k8s.io/external-dns/external-dns
+  tag: v0.23.0@sha256:1854499e2b08cee47c40a08e356bff20dcb192dbcfde8378fc3f900f12cad5a3
+
+provider:
+  name: aws
+
+env:
+  - name: AWS_DEFAULT_REGION
+    value: {{ fetchSecretValue "ref+awsssm://hw/gitops/region" | quote }}
+
+serviceAccount:
+  create: true
+  name: external-dns
+  annotations:
+    eks.amazonaws.com/role-arn: {{ fetchSecretValue "ref+awsssm://hw/gitops/role_external_dns" | quote }}
+
+sources: [ingress]
+domainFilters:
+  - {{ fetchSecretValue "ref+awsssm://hw/gitops/domain" }}
+extraArgs:
+  - --zone-id-filter={{ fetchSecretValue "ref+awsssm://hw/gitops/hosted_zone_id" }}
+  - --aws-zone-type=public
+
+# sync = also delete records it created; TXT ownership records stop it touching anything else.
+policy: sync
+registry: txt
+txtOwnerId: hw
+
+resources:
+  requests: { cpu: 10m, memory: 32Mi }
+  limits: { cpu: 100m, memory: 128Mi }

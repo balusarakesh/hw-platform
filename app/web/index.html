@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>hello-world</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 40rem; margin: 3rem auto; padding: 0 1rem; color: #1a1a1a; }
+    button { font-size: 1rem; padding: .6rem 1.2rem; cursor: pointer; }
+    table { border-collapse: collapse; width: 100%; margin-top: 1.5rem; }
+    th, td { text-align: left; padding: .4rem .6rem; border-bottom: 1px solid #ddd; }
+    #status { margin-top: 1rem; color: #555; }
+  </style>
+</head>
+<body>
+  <h1>hello-world</h1>
+  <p>Go on EKS, reading from Aurora PostgreSQL with IAM database auth.</p>
+  <button id="load">Load rows from the database</button>
+  <div id="status"></div>
+  <table id="rows" hidden>
+    <thead><tr><th>id</th><th>name</th><th>created</th></tr></thead>
+    <tbody></tbody>
+  </table>
+  <script>
+    const btn = document.getElementById('load');
+    const status = document.getElementById('status');
+    const table = document.getElementById('rows');
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      status.textContent = 'Querying… (the first query can take ~15s while Aurora resumes)';
+      try {
+        const res = await fetch('/api/items');
+        const body = await res.json();
+        if (!res.ok) throw new Error(body.error || res.statusText);
+        const tbody = table.querySelector('tbody');
+        tbody.replaceChildren(...body.items.map(it => {
+          const tr = document.createElement('tr');
+          for (const v of [it.id, it.name, new Date(it.created_at).toLocaleString()]) {
+            const td = document.createElement('td');
+            td.textContent = v; // textContent, never innerHTML
+            tr.appendChild(td);
+          }
+          return tr;
+        }));
+        table.hidden = false;
+        status.textContent = `${body.items.length} rows in ${body.db_ms} ms`;
+      } catch (e) {
+        status.textContent = 'Error: ' + e.message;
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

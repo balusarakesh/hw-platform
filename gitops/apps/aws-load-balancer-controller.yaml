@@ -1,0 +1,28 @@
+# Rendered by the helmfile plugin: `helmfile --selector name=aws-load-balancer-controller template`.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: aws-load-balancer-controller
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/balusarakesh/hw-platform.git
+    targetRevision: main
+    path: gitops
+    plugin:
+      name: helmfile
+      env:
+        - name: RELEASE
+          value: aws-load-balancer-controller
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kube-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true

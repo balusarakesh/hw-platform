@@ -1,0 +1,15 @@
+# Each entry is a deliberate, documented decision (README "Security exceptions" / docs/GAPS.md).
+
+# Public repo is required by the assignment.
+GIT-0001
+# EKS public endpoint is on but restricted to my IP via /hw/admin_cidrs (sensitive, not visible to the scanner).
+AWS-0040
+# Node SG egress 0.0.0.0/0: nodes pull images and call AWS APIs through the NAT. Locking it down
+# needs VPC endpoints or an egress proxy (cost) - see GAPS.
+AWS-0104
+# api/audit/authenticator logs are on; controllerManager/scheduler are skipped for log cost.
+AWS-0038
+# State bucket access logging would need a second bucket; CloudTrail covers API access.
+AWS-0089
+# Distroless image has no shell for HEALTHCHECK; Kubernetes liveness/readiness probes cover it.
+DS-0026

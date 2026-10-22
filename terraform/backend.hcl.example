@@ -1,0 +1,10 @@
+# Copy to backend.hcl (gitignored) or generate it:
+#   terraform -chdir=terraform/bootstrap output -raw backend_hcl > terraform/backend.hcl
+# Each stack sets its own `key` in versions.tf and runs:
+#   terraform init -backend-config=../backend.hcl
+bucket       = "hw-tfstate-<account-id>-<region>"
+region       = "<region>"
+profile      = "default"
+encrypt      = true
+kms_key_id   = "<state kms key arn>"
+use_lockfile = true

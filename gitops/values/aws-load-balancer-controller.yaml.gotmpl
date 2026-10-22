@@ -1,0 +1,22 @@
+clusterName: {{ fetchSecretValue "ref+awsssm://hw/gitops/cluster_name" | quote }}
+region: {{ fetchSecretValue "ref+awsssm://hw/gitops/region" | quote }}
+vpcId: {{ fetchSecretValue "ref+awsssm://hw/gitops/vpc_id" | quote }}
+
+image:
+  repository: public.ecr.aws/eks/aws-load-balancer-controller
+  tag: v3.6.1@sha256:954b5233e17128a18d12f7fcaac4c7ed792dea4bba0beeb5d450c5a4538e3394
+
+replicaCount: 1
+
+serviceAccount:
+  create: true
+  name: aws-load-balancer-controller
+  annotations:
+    eks.amazonaws.com/role-arn: {{ fetchSecretValue "ref+awsssm://hw/gitops/role_lb_controller" | quote }}
+
+# Only reconcile Ingresses/Services we explicitly hand to it; don't hijack every type=LoadBalancer.
+enableServiceMutatorWebhook: false
+
+resources:
+  requests: { cpu: 25m, memory: 64Mi }
+  limits: { cpu: 200m, memory: 256Mi }

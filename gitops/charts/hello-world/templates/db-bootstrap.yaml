@@ -1,0 +1,54 @@
+{{- if .Values.dbBootstrap.enabled }}
+# Runs before every sync (ArgoCD PreSync hook): creates the IAM-auth app user, schema and seed rows.
+# Idempotent, so re-running on each deploy is safe. Uses the same image as the app (`migrate` subcommand)
+# with its own SA/role, which is the only thing allowed to read the RDS master secret.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ .Values.dbBootstrap.serviceAccountName }}
+  labels:
+    {{- include "hello-world.labels" . | nindent 4 }}
+  annotations:
+    eks.amazonaws.com/role-arn: {{ required "dbBootstrap.roleArn is required" .Values.dbBootstrap.roleArn | quote }}
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "-1"
+automountServiceAccountToken: false
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: hello-world-db-bootstrap
+  labels:
+    {{- include "hello-world.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  # A paused Aurora takes ~15s to resume; retries cover that.
+  backoffLimit: 4
+  activeDeadlineSeconds: 300
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: hello-world-db-bootstrap
+    spec:
+      restartPolicy: Never
+      serviceAccountName: {{ .Values.dbBootstrap.serviceAccountName }}
+      automountServiceAccountToken: false
+      securityContext:
+        {{- include "hello-world.podSecurityContext" . | nindent 8 }}
+      containers:
+        - name: migrate
+          image: {{ include "hello-world.image" . }}
+          args: [migrate]
+          env:
+            {{- include "hello-world.dbEnv" . | nindent 12 }}
+            - { name: DB_MASTER_USER, value: {{ .Values.dbBootstrap.masterUsername | quote }} }
+            - { name: DB_MASTER_SECRET_ARN, value: {{ .Values.dbBootstrap.masterSecretArn | quote }} }
+          securityContext:
+            {{- include "hello-world.containerSecurityContext" . | nindent 12 }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+{{- end }}
