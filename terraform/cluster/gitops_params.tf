@@ -20,6 +20,7 @@ locals {
     db_app_user          = var.app_db_user
     db_master_username   = local.p.aurora_master_username
     db_master_secret_arn = local.p.aurora_master_secret_arn
+    waf_acl_arn          = local.p.waf_acl_arn
   }
 }
 

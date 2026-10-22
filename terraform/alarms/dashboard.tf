@@ -21,6 +21,7 @@ locals {
           [for a in aws_cloudwatch_metric_alarm.apiserver_errors : a.arn],
           [
             aws_cloudwatch_metric_alarm.alb_high_request_rate.arn,
+            aws_cloudwatch_metric_alarm.waf_rate_limited.arn,
             aws_cloudwatch_metric_alarm.alb_high_latency.arn,
             aws_cloudwatch_metric_alarm.alb_5xx_rate.arn,
             aws_cloudwatch_metric_alarm.alb_unhealthy_targets.arn,
@@ -157,6 +158,18 @@ locals {
         metrics = [
           ["AWS/RDS", "ServerlessDatabaseCapacity", "DBClusterIdentifier", local.p.aurora_cluster_id, { stat = "Average", label = "ACUs" }],
           [".", "ACUUtilization", ".", ".", { stat = "Average", label = "ACU %", yAxis = "right" }],
+        ]
+      }
+    },
+    {
+      type = "metric", x = 0, y = 34, width = 24, height = 6
+      properties = {
+        title = "WAF: allowed vs blocked (429 = rate-limit-per-ip)", region = var.region, stat = "Sum", period = 60
+        metrics = [
+          ["AWS/WAFV2", "AllowedRequests", "WebACL", "${local.cn}-app", "Region", var.region, "Rule", "ALL", { label = "allowed" }],
+          [".", "BlockedRequests", ".", ".", ".", ".", "Rule", "rate-limit-per-ip", { label = "rate limited (429)" }],
+          [".", "BlockedRequests", ".", ".", ".", ".", "Rule", "aws-common", { label = "managed: common" }],
+          [".", "BlockedRequests", ".", ".", ".", ".", "Rule", "aws-known-bad-inputs", { label = "managed: bad inputs" }],
         ]
       }
     },
