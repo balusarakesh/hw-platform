@@ -59,7 +59,7 @@ module "aurora" {
     family = var.parameter_group_family
     parameters = [
       # Reject any non-TLS connection.
-      { name = "rds.force_ssl", value = "1" },
+      { name = "rds.force_ssl", value = "1", apply_method = "pending-reboot" }, # static parameter
       # PG 18: a list of connection stages to log, no longer on/off.
       { name = "log_connections", value = "all" },
     ]
