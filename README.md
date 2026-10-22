@@ -3,8 +3,8 @@
 Incode SRE take-home: a Go **hello-world** app on **EKS**, reading from **Aurora PostgreSQL Serverless v2** with
 IAM database auth, deployed by **ArgoCD + helmfile**, all provisioned with **Terraform** and secure by default.
 
-> Status: **Phase 1 (baseline)** written and validated locally (not yet applied to AWS). Observability, CI/CD,
-> PR diffs, Atlantis and extras follow in later phases. Known gaps and trade-offs: [docs/GAPS.md](docs/GAPS.md).
+> Status: **live** at https://app.test-hw-app.click — Phase 1 (baseline) deployed; Phase 2 (observability)
+> deployed except the `terraform/alarms` stack. CI/CD, PR diffs, Atlantis and extras follow. Known gaps and trade-offs: [docs/GAPS.md](docs/GAPS.md).
 >
 > The AWS account's guardrails (SCPs) shape several choices: region `us-east-2`, **EKS Pod Identity** instead of
 > IRSA, **Cluster Autoscaler** instead of Karpenter, and no GitHub Actions OIDC. See
@@ -132,6 +132,22 @@ ArgoCD UI: `kubectl -n argocd port-forward svc/argocd-server 8443:443` (never ex
 - **node-exporter** uses `hostNetwork`/`hostPID` to read node conntrack and NIC (ENA) counters. Its namespace
   (`node-exporter`) is PSA `privileged` (warn: restricted); the pod runs as uid 65534, no capabilities,
   read-only rootfs, no host root filesystem mount.
+- **AWS-managed EKS addons run as root / privileged** (they manage node networking, credentials and logs).
+  Output of a scan of the live cluster (`kubectl get pods -A -o json`, containers that are privileged or don't
+  prevent root):
+
+  | Namespace | Addon (container) | Why |
+  |---|---|---|
+  | kube-system | vpc-cni (`aws-node`, `aws-vpc-cni-init`, `aws-eks-nodeagent`) | programs node networking / eBPF NetworkPolicy |
+  | kube-system | kube-proxy | iptables rules on the host |
+  | kube-system | eks-pod-identity-agent (+ init) | link-local credential endpoint on the node |
+  | kube-system | eks-node-monitoring-agent | reads kernel/runtime health for node auto repair |
+  | kube-system | coredns | AWS addon defaults |
+  | amazon-cloudwatch | cloudwatch-agent, cloudwatch-agent-prometheus, fluent-bit, controller | reads host logs/metrics; AWS addon defaults |
+
+  Every workload this repo deploys (app, db-bootstrap, ArgoCD, LB controller, external-dns, cluster-autoscaler,
+  kube-state-metrics, node-exporter) runs as non-root with no privilege escalation; PSA `restricted` is
+  **enforced** on `argocd`, `external-dns`, `hello-world` and `monitoring`.
 - More in [docs/GAPS.md](docs/GAPS.md).
 
 ## Threat model (short)
