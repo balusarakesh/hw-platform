@@ -107,3 +107,9 @@ variable "ena_exceeded_per_minute" {
   type        = number
   default     = 100
 }
+
+variable "rate_limit_per_minute" {
+  description = "WAF per-IP rate limit (must match terraform/persistent/waf.tf); used in alarm text."
+  type        = number
+  default     = 600
+}

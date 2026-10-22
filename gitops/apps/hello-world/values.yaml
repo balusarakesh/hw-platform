@@ -21,6 +21,7 @@ dbBootstrap:
 ingress:
   host: "ref+awsssm://hw/gitops/app_host"
   certificateArn: "ref+awsssm://hw/gitops/acm_certificate_arn"
+  wafAclArn: "ref+awsssm://hw/gitops/waf_acl_arn"
 
 # Scales on CPU/memory between min and max. Hitting max raises the hw-hpa-at-max alarm (Phase 2).
 hpa:

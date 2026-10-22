@@ -37,6 +37,8 @@ dbBootstrap:
 ingress:
   host: ""
   certificateArn: ""
+  # Optional AWS WAF web ACL attached to the ALB.
+  wafAclArn: ""
   # Fixed IngressGroup: every Ingress in the group shares one ALB whose name/tags stay stable.
   groupName: hw
 

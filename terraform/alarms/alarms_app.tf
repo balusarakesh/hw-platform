@@ -125,3 +125,29 @@ resource "aws_cloudwatch_metric_alarm" "aurora_acu_high" {
   alarm_actions = local.actions
   ok_actions    = local.actions
 }
+
+# Someone is hitting the per-IP rate limit (WAF answered 429). Informational: the limit is doing its
+# job, but sustained blocking means either abuse or a legitimate client that needs a higher limit.
+resource "aws_cloudwatch_metric_alarm" "waf_rate_limited" {
+  alarm_name        = "hw-waf-rate-limited"
+  alarm_description = "WAF returned 429 (per-IP rate limit, ${var.rate_limit_per_minute} req/60s) in 2 of the last 5 minutes. Check first: WAF log group aws-waf-logs-hw-app (which IP, which path), then decide: block the IP or raise the limit."
+
+  namespace   = "AWS/WAFV2"
+  metric_name = "BlockedRequests"
+  dimensions = {
+    WebACL = "${local.cluster_name}-app"
+    Rule   = "rate-limit-per-ip"
+    Region = var.region
+  }
+  statistic = "Sum"
+  period    = 60
+
+  comparison_operator = "GreaterThanThreshold"
+  threshold           = 0
+  evaluation_periods  = 5
+  datapoints_to_alarm = 2
+  treat_missing_data  = "notBreaching"
+
+  alarm_actions = local.actions
+  ok_actions    = local.actions
+}
