@@ -18,15 +18,16 @@ resource "aws_acm_certificate" "main" {
 }
 
 resource "aws_route53_record" "acm_validation" {
-  # apex and wildcard share one validation record, so de-duplicate by record name.
+  # Keyed by domain name (known at plan time; the record names aren't until the cert exists).
+  # Apex and wildcard get the same validation record, so allow_overwrite lets both "own" it.
   for_each = {
-    for dvo in aws_acm_certificate.main.domain_validation_options : dvo.resource_record_name => dvo...
+    for dvo in aws_acm_certificate.main.domain_validation_options : dvo.domain_name => dvo
   }
 
   zone_id         = data.aws_route53_zone.main.zone_id
-  name            = each.value[0].resource_record_name
-  type            = each.value[0].resource_record_type
-  records         = [each.value[0].resource_record_value]
+  name            = each.value.resource_record_name
+  type            = each.value.resource_record_type
+  records         = [each.value.resource_record_value]
   ttl             = 300
   allow_overwrite = true
 }

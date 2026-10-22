@@ -60,8 +60,10 @@ output "aurora_database_name" {
   value = module.aurora.database_name
 }
 
+# The module marks the username sensitive, but it's a fixed, non-secret name ("hw_admin");
+# the password is what's secret and it never leaves Secrets Manager.
 output "aurora_master_username" {
-  value = module.aurora.master_username
+  value = nonsensitive(module.aurora.master_username)
 }
 
 output "aurora_master_secret_arn" {
