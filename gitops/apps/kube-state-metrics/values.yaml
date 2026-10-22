@@ -1,0 +1,42 @@
+# Values for the kube-state-metrics Helm release (prometheus-community/kube-state-metrics).
+# Container Insights already covers deployments/pods/nodes; this only adds HPA state for the
+# hw-hpa-at-max alarm. Scraped by cloudwatch-agent-prometheus.
+
+image:
+  registry: registry.k8s.io
+  repository: kube-state-metrics/kube-state-metrics
+  tag: v2.20.0@sha256:42cfe3723a5f058171c627537fb57a3ea0f26e4380fa18555a95cb1a1b4cfc5b
+
+collectors:
+  - horizontalpodautoscalers
+
+metricAllowlist:
+  - kube_horizontalpodautoscaler_spec_max_replicas
+  - kube_horizontalpodautoscaler_spec_min_replicas
+  - kube_horizontalpodautoscaler_status_current_replicas
+  - kube_horizontalpodautoscaler_status_desired_replicas
+
+selfMonitor:
+  enabled: false
+
+securityContext:
+  enabled: true
+  runAsNonRoot: true
+  runAsUser: 65534
+  runAsGroup: 65534
+  fsGroup: 65534
+  seccompProfile:
+    type: RuntimeDefault
+containerSecurityContext:
+  privileged: false
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: [ALL]
+
+customLabels:
+  hw.io/scrape: "true"
+
+resources:
+  requests: { cpu: 10m, memory: 32Mi }
+  limits: { cpu: 100m, memory: 128Mi }

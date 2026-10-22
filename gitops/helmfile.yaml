@@ -13,6 +13,8 @@ repositories:
     url: https://kubernetes-sigs.github.io/external-dns
   - name: autoscaler
     url: https://kubernetes.github.io/autoscaler
+  - name: prometheus-community
+    url: https://prometheus-community.github.io/helm-charts
 
 releases:
   - name: argocd
@@ -48,3 +50,19 @@ releases:
     chart: ./charts/hello-world
     values:
       - apps/hello-world/values.yaml
+
+  # Metrics sources for CloudWatch alarms (scraped by the cloudwatch-agent-prometheus workload
+  # from the amazon-cloudwatch-observability EKS addon).
+  - name: node-exporter
+    namespace: node-exporter
+    chart: prometheus-community/prometheus-node-exporter
+    version: 4.60.0
+    values:
+      - apps/node-exporter/values.yaml
+
+  - name: kube-state-metrics
+    namespace: monitoring
+    chart: prometheus-community/kube-state-metrics
+    version: 8.6.0
+    values:
+      - apps/kube-state-metrics/values.yaml

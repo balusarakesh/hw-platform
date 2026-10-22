@@ -63,6 +63,16 @@ module "eks" {
     metrics-server = {}
     # Detects node health issues (kernel, network, runtime) and feeds node auto repair.
     eks-node-monitoring-agent = {}
+
+    # Container Insights (enhanced) + Fluent Bit -> CloudWatch Logs, plus a second CloudWatch agent
+    # (Deployment, 1 replica) that scrapes Prometheus endpoints and publishes an allowlist as EMF.
+    amazon-cloudwatch-observability = {
+      pod_identity_association = [{
+        role_arn        = module.pod_identity_cloudwatch_observability.iam_role_arn
+        service_account = "cloudwatch-agent"
+      }]
+      configuration_values = jsonencode(local.cloudwatch_observability_config)
+    }
   }
 
   eks_managed_node_groups = {

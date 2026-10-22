@@ -1,0 +1,55 @@
+# Values for the node-exporter Helm release (prometheus-community/prometheus-node-exporter).
+# Only exists to feed the node network alarms: Linux conntrack table usage and the ENA
+# "allowance exceeded" counters (ethtool). Everything else is disabled to keep CloudWatch cost down.
+# Scraped by the CloudWatch agent (cloudwatch-agent-prometheus); not exposed outside the cluster.
+
+image:
+  registry: quay.io
+  repository: prometheus/node-exporter
+  tag: v1.12.1
+  digest: sha256:1b4e4438faca4dd7e001dd445d161a4a2091b0fededa84093b3a8dfeae1f1be0
+
+# Host network/PID are needed to see the node's conntrack table and NIC stats.
+# That's visibility, not root: the container runs as nobody with no capabilities.
+hostNetwork: true
+hostPID: true
+# No need for the node's root filesystem (filesystem collector is off).
+hostRootFsMount:
+  enabled: false
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 65534
+  runAsGroup: 65534
+  fsGroup: 65534
+  seccompProfile:
+    type: RuntimeDefault
+containerSecurityContext:
+  privileged: false
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: [ALL]
+
+extraArgs:
+  - --collector.disable-defaults
+  # node_nf_conntrack_entries / node_nf_conntrack_entries_limit
+  - --collector.conntrack
+  # node_ethtool_<stat>: ENA driver counters, only the allowance ones
+  - --collector.ethtool
+  - --collector.ethtool.device-include=^(eth|ens).*
+  - --collector.ethtool.metrics-include=^(bw_in_allowance_exceeded|bw_out_allowance_exceeded|pps_allowance_exceeded|conntrack_allowance_exceeded|conntrack_allowance_available|linklocal_allowance_exceeded)$
+
+service:
+  enabled: true
+  type: ClusterIP
+  port: 9100
+  targetPort: 9100
+  portName: metrics
+
+podLabels:
+  hw.io/scrape: "true"
+
+resources:
+  requests: { cpu: 10m, memory: 24Mi }
+  limits: { cpu: 100m, memory: 64Mi }

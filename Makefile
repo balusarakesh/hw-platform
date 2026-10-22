@@ -22,7 +22,8 @@ bootstrap: ## First apply of terraform/bootstrap with local state, then migrate 
 	$(TF) -chdir=terraform/bootstrap init -migrate-state -force-copy -backend-config=../backend.hcl
 	rm -f terraform/bootstrap/terraform.tfstate terraform/bootstrap/terraform.tfstate.backup
 
-# --- regular stacks: make plan STACK=persistent | cluster ------------------------------------------
+# --- regular stacks: make plan STACK=persistent | cluster | alarms ---------------------------------
+# alarms: apply after the first ArgoCD sync (it looks up the controller-created ALB by IngressGroup tag).
 
 .PHONY: init plan apply
 init: ## terraform init for $(STACK) against the S3 backend

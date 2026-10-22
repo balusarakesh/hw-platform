@@ -60,6 +60,12 @@ IAM database auth, deployed by **ArgoCD + helmfile**, all provisioned with **Ter
   resolves them (vals) at render time.
 - **Autoscaling.** The app has an HPA (2–6 replicas, CPU 70% / memory 80%, metrics-server addon). Cluster
   Autoscaler adds nodes (up to 3) when pods don't fit.
+- **Observability.** The `amazon-cloudwatch-observability` EKS addon runs Container Insights (enhanced) and
+  Fluent Bit (all pod logs → KMS-encrypted CloudWatch log groups with 14-day retention). A second CloudWatch agent
+  (`cloudwatch-agent-prometheus`, one replica) scrapes pods labelled `hw.io/scrape=true`: the app's `/metrics`
+  (port 9090, never exposed outside the cluster), node-exporter (conntrack + ENA allowance counters) and
+  kube-state-metrics (HPA state). Only an allowlist is published to the `hw/Prometheus` namespace. Alarms
+  (→ SNS email) and the `hw-overview` dashboard live in `terraform/alarms`.
 - **IAM for pods.** EKS Pod Identity: each role trusts `pods.eks.amazonaws.com` and is bound to exactly one
   `namespace/serviceaccount` by an association in Terraform, so charts carry no role ARNs.
 - **DB access without passwords.** The app's Pod Identity role allows `rds-db:connect` for one DB user. The app mints a
@@ -84,6 +90,23 @@ Prerequisites: Terraform ≥ 1.17, AWS CLI (profile `default`), `gh`, Docker via
 4. **First image:** `colima start --arch aarch64 && make image` (commit the updated image tag/digest in `gitops/apps/hello-world/values.yaml`), push to `main`
 5. **Cluster:** `make plan STACK=cluster && make apply STACK=cluster`, then `make kubeconfig`
 6. ArgoCD syncs everything; `https://app.test-hw-app.click` serves once the ALB and DNS are up.
+7. **Alarms + dashboard:** `make plan STACK=alarms && make apply STACK=alarms` (after the ALB exists; it's looked up
+   by its IngressGroup tag). Confirm the SNS subscription email.
+
+## Power off / on (cost saver)
+
+Only the managed node group (scaled to 0) and Aurora (stopped) are touched. The EKS control plane, NAT, ALB, DNS,
+ECR, secrets and state keep running, so bring-up takes minutes.
+
+```bash
+/opt/homebrew/bin/python3 -m venv scripts/.venv && scripts/.venv/bin/pip install -r scripts/requirements.txt
+scripts/.venv/bin/python scripts/power.py status      # read-only: sizes, Aurora state, root/CA auto-sync, alarm actions, $/hour
+scripts/.venv/bin/python scripts/power.py down        # dry run
+scripts/.venv/bin/python scripts/power.py down --yes  # alarms off → pause ArgoCD auto-sync (root, then cluster-autoscaler) → CA to 0 → nodes to 0 → stop Aurora
+scripts/.venv/bin/python scripts/power.py up --yes    # start Aurora + restore nodes in parallel → CA to 1 → resume auto-sync → wait for /readyz and /api/items → alarms on
+```
+
+`--profile` (default `default`) and `--region` (default `us-east-2`) are supported; every command is idempotent.
 
 ArgoCD UI: `kubectl -n argocd port-forward svc/argocd-server 8443:443` (never exposed publicly).
 
@@ -106,6 +129,9 @@ ArgoCD UI: `kubectl -n argocd port-forward svc/argocd-server 8443:443` (never ex
 - **Module pinning by version, not commit hash** (`CKV_TF_1` skipped): registry modules are exact-version pinned and
   provider checksums are locked in `.terraform.lock.hcl` for darwin/linux.
 - **`kube-system` has no PSA label**: AWS-managed addons live there.
+- **node-exporter** uses `hostNetwork`/`hostPID` to read node conntrack and NIC (ENA) counters. Its namespace
+  (`node-exporter`) is PSA `privileged` (warn: restricted); the pod runs as uid 65534, no capabilities,
+  read-only rootfs, no host root filesystem mount.
 - More in [docs/GAPS.md](docs/GAPS.md).
 
 ## Threat model (short)

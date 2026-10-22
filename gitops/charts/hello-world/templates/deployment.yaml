@@ -21,6 +21,8 @@ spec:
     metadata:
       labels:
         {{- include "hello-world.selectorLabels" . | nindent 8 }}
+        # Opt-in label the CloudWatch agent's Prometheus scrape config selects on.
+        hw.io/scrape: "true"
     spec:
       serviceAccountName: {{ .Values.serviceAccount.name }}
       automountServiceAccountToken: false
@@ -43,9 +45,13 @@ spec:
           ports:
             - name: http
               containerPort: 8080
+            # Prometheus metrics; scraped in-cluster by pod IP only. Not in the Service or Ingress.
+            - name: metrics
+              containerPort: 9090
           env:
             {{- include "hello-world.dbEnv" . | nindent 12 }}
             - { name: LISTEN_ADDR, value: ":8080" }
+            - { name: METRICS_ADDR, value: ":9090" }
           securityContext:
             {{- include "hello-world.containerSecurityContext" . | nindent 12 }}
           resources:

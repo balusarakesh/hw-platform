@@ -78,6 +78,11 @@ service control policies cap what even the account's admin can do. Each restrict
 - **"Off" only terminates nodes and stops Aurora.** The EKS control plane, NAT, ALB, public IPs, KMS, Secrets Manager and Route 53 keep running, roughly $4–5/day.
   - The PDF says *"tear down the cluster when not actively working"*. This repo reads that as tearing down compute, and keeps the control plane so bring-up takes minutes instead of about 20.
   - *Fix:* if cost matters more, destroy the cluster stack instead.
+- **`power.py` pauses ArgoCD auto-sync** for the `root` app-of-apps and `cluster-autoscaler` while powered down
+  (otherwise self-heal would bring the autoscaler back and it would re-grow the node group). Nothing else
+  self-heals in that window; if the script dies mid-way, re-run `up`.
+- **`power.py`'s cost estimate** is a static us-east-2 price table plus current Aurora ACUs; it ignores data
+  transfer, LCUs, storage and snapshots.
 - **Aurora auto-starts after 7 days stopped** (AWS limit). `power.py status` warns about this, but nothing re-stops it automatically.
   - *Fix:* an EventBridge rule that re-stops it.
 - **`power.py` scales the node group outside Terraform.** The EKS module ignores `desired_size` changes, so there's no drift. `min_size` is 0 in Terraform for the same reason.
@@ -100,6 +105,19 @@ service control policies cap what even the account's admin can do. Each restrict
 - **CloudWatch custom metrics cost.** It grows with metric × dimension combinations, so `metric_declaration` allowlists keep it small. Adding per-pod or per-route dimensions would multiply the cost.
 - **Instance limits are hand-maintained variables.** The network baseline and conntrack allowance thresholds come from the instance type. If the instance type changes, the variables must change too.
   - *Fix:* derive them from `ec2:DescribeInstanceTypes` in Terraform.
+- **Some metric names are unverified until the cluster runs.** Container Insights enhanced metric names and the
+  EKS vended control-plane metric names (`apiserver_request_duration_seconds_<VERB>_P99`, `..._5XX`, `..._429`)
+  come from AWS docs and are marked TODO-verify in `terraform/alarms`; check with `aws cloudwatch list-metrics`.
+- **ENA counter alarms assume the CloudWatch agent publishes Prometheus counters as deltas.** If they arrive as
+  cumulative totals, switch those alarms to `RATE()`/`DIFF()` metric math.
+- **The HPA `ScalingLimited` condition isn't alarmed**: it's also true at `minReplicas` (idle). Only "at
+  maxReplicas for 5 minutes" (`hw-hpa-at-max`) is.
+- **The addon's bundled node-exporter/kube-state-metrics are disabled** (~250m CPU requests each, no ethtool
+  collector); slimmer, digest-pinned versions run from `gitops/apps/`.
+- **One Prometheus scraper replica.** If it's down, Prometheus-based alarms (conntrack, ENA, HPA) see missing data
+  and stay OK (`notBreaching`). *Fix:* alarm on the scraper's own heartbeat, or 2 replicas with a target allocator.
 - **Alarms are tested by hand.** Some are tested with `set-alarm-state` rather than real failures (EC2 status checks, control plane). There's no automated alert testing.
+- **Log retention is 14 days** everywhere (flow logs, control plane, Aurora, Container Insights). *Fix:* longer
+  retention or export to S3/Glacier for audit needs.
 - **No distributed tracing.** *Fix:* OpenTelemetry SDK + ADOT → X-Ray.
 - **Alarms go to email only, with no on-call routing.** *Fix:* SNS → PagerDuty/Opsgenie/Slack.

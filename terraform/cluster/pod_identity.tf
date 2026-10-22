@@ -147,3 +147,16 @@ module "pod_identity_argocd_repo_server" {
     }
   }
 }
+
+# CloudWatch agent + Fluent Bit (amazon-cloudwatch-observability addon): write Container Insights
+# metrics, Prometheus-scraped metrics (EMF) and container logs. The association is made by the addon
+# itself (eks.tf: pod_identity_association), so this role has no associations here.
+module "pod_identity_cloudwatch_observability" {
+  source  = "terraform-aws-modules/eks-pod-identity/aws"
+  version = "2.10.0"
+
+  name            = "${var.project}-cloudwatch-observability"
+  use_name_prefix = false
+
+  attach_aws_cloudwatch_observability_policy = true
+}
