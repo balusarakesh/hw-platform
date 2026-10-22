@@ -17,6 +17,7 @@ IAM database auth, deployed by **ArgoCD + helmfile**, all provisioned with **Ter
                     │ 443 (80 → 301 to 443)
           ┌─────────▼──────────┐   public subnets (ALB + NAT only)
           │ ALB (ACM TLS 1.3)  │◄── app.test-hw-app.click (Route 53, external-dns)
+          │ + AWS WAF          │    10 RPS/IP → 429, AWS managed rules → 403
           └─────────┬──────────┘
                     │ pod IPs (target-type ip)
  ┌──────────────────▼─────────────────────────────┐ private subnets
@@ -60,6 +61,11 @@ IAM database auth, deployed by **ArgoCD + helmfile**, all provisioned with **Ter
   resolves them (vals) at render time.
 - **Autoscaling.** The app has an HPA (2–6 replicas, CPU 70% / memory 80%, metrics-server addon). Cluster
   Autoscaler adds nodes (up to 3) when pods don't fit.
+- **Edge protection.** AWS WAF on the ALB (`terraform/persistent/waf.tf`, attached by the LB controller via the
+  `wafv2-acl-arn` Ingress annotation): a per-IP rate limit of 600 requests/60s (10 RPS) answers **429** with
+  `Retry-After: 60`; AWS managed Common + Known Bad Inputs rule groups answer **403** (verified: Log4Shell
+  header and path traversal blocked). Blocked requests are logged to `aws-waf-logs-hw-app`; the
+  `hw-waf-rate-limited` alarm fires when the limit is being hit.
 - **Observability.** The `amazon-cloudwatch-observability` EKS addon runs Container Insights (enhanced) and
   Fluent Bit (all pod logs → KMS-encrypted CloudWatch log groups with 14-day retention). A second CloudWatch agent
   (`cloudwatch-agent-prometheus`, one replica) scrapes pods labelled `hw.io/scrape=true`: the app's `/metrics`
@@ -152,7 +158,7 @@ ArgoCD UI: `kubectl -n argocd port-forward svc/argocd-server 8443:443` (never ex
 
 ## Threat model (short)
 
-- **Exposed:** ALB on 443/80 only. Nothing else is internet-reachable; `/metrics` listens on a separate port that no
+- **Exposed:** ALB on 443/80 only, behind AWS WAF (per-IP rate limit + AWS managed rules). Nothing else is internet-reachable; `/metrics` listens on a separate port that no
   Service or Ingress exposes. ArgoCD is port-forward only.
 - **Compromised app pod:** can log in to Postgres as `hw_app` (SELECT only) and nothing else in AWS; IMDS hop limit
   blocks the node role; PSA restricted blocks privilege escalation.
