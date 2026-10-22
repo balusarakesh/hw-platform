@@ -58,17 +58,13 @@ locals {
       dimensions       = [["ClusterName", "route"]]
       metric_selectors = ["^http_request_duration_seconds_(sum|count)$"]
     },
-    # Nodes: Linux conntrack table + ENA allowance counters. [ClusterName] for alarms (worst node),
+    # Nodes: Linux conntrack table (ENA counters come from the agent's ethtool plugin). [ClusterName] for alarms (worst node),
     # [ClusterName, NodeName] for the dashboard.
     {
-      source_labels = ["job"]
-      label_matcher = "^node-exporter$"
-      dimensions    = [["ClusterName"], ["ClusterName", "NodeName"]]
-      metric_selectors = [
-        "^node_nf_conntrack_entries(_limit)?$",
-        "^node_ethtool_(bw_in|bw_out|pps|conntrack|linklocal)_allowance_exceeded$",
-        "^node_ethtool_conntrack_allowance_available$",
-      ]
+      source_labels    = ["job"]
+      label_matcher    = "^node-exporter$"
+      dimensions       = [["ClusterName"], ["ClusterName", "NodeName"]]
+      metric_selectors = ["^node_nf_conntrack_entries(_limit)?$"]
     },
     # HPA state for the hw-hpa-* alarms (HPAs are long-lived, so per-HPA dimensions are fine).
     {
@@ -96,6 +92,22 @@ locals {
       {
         name = "cloudwatch-agent"
         config = {
+          # ENA allowance counters via the agent's native ethtool plugin. (node-exporter's ethtool
+          # metrics are Prometheus "untyped", which the CloudWatch agent drops.) The DaemonSet runs on
+          # the host network, so it sees the node's ENA interface. Values are cumulative counters
+          # (alarms use DIFF); published per instance plus one cluster-wide aggregate (no dimensions).
+          metrics = {
+            namespace                   = "hw/ENA"
+            metrics_collection_interval = 60
+            append_dimensions           = { InstanceId = "$${aws:InstanceId}" }
+            aggregation_dimensions      = [[]]
+            metrics_collected = {
+              ethtool = {
+                interface_include = ["ens5", "eth0"]
+                metrics_include   = ["bw_in_allowance_exceeded", "bw_out_allowance_exceeded", "pps_allowance_exceeded", "conntrack_allowance_exceeded", "linklocal_allowance_exceeded", "conntrack_allowance_available"]
+              }
+            }
+          }
           logs = {
             metrics_collected = {
               kubernetes = {

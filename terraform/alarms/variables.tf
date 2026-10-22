@@ -101,3 +101,9 @@ variable "aurora_acu_utilization_percent" {
   type        = number
   default     = 80
 }
+
+variable "ena_exceeded_per_minute" {
+  description = "Cluster-wide ENA allowance-exceeded packets per minute that count as a breaching minute."
+  type        = number
+  default     = 100
+}
