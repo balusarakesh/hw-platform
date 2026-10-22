@@ -60,7 +60,8 @@ module "aurora" {
     parameters = [
       # Reject any non-TLS connection.
       { name = "rds.force_ssl", value = "1" },
-      { name = "log_connections", value = "1" },
+      # PG 18: a list of connection stages to log, no longer on/off.
+      { name = "log_connections", value = "all" },
     ]
   }
 
