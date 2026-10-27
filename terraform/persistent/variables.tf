@@ -19,7 +19,7 @@ variable "project" {
 variable "domain" {
   description = "Domain whose hosted zone the bootstrap stack created."
   type        = string
-  default     = "test-hw-app.click"
+  default     = "app-test-hw.click"
 }
 
 variable "vpc_cidr" {

@@ -3,7 +3,7 @@
 Incode SRE take-home: a Go **hello-world** app on **EKS**, reading from **Aurora PostgreSQL Serverless v2** with
 IAM database auth, deployed by **ArgoCD + helmfile**, all provisioned with **Terraform** and secure by default.
 
-> Status: **live** at https://app.test-hw-app.click — Phase 1 (baseline) deployed; Phase 2 (observability)
+> Status: **live** at https://app.app-test-hw.click — Phase 1 (baseline) deployed; Phase 2 (observability)
 > deployed except the `terraform/alarms` stack. CI/CD, PR diffs, Atlantis and extras follow. Known gaps and trade-offs: [docs/GAPS.md](docs/GAPS.md).
 >
 > The AWS account's guardrails (SCPs) shape several choices: region `us-east-2`, **EKS Pod Identity** instead of
@@ -16,7 +16,7 @@ IAM database auth, deployed by **ArgoCD + helmfile**, all provisioned with **Ter
                  Internet
                     │ 443 (80 → 301 to 443)
           ┌─────────▼──────────┐   public subnets (ALB + NAT only)
-          │ ALB (ACM TLS 1.3)  │◄── app.test-hw-app.click (Route 53, external-dns)
+          │ ALB (ACM TLS 1.3)  │◄── app.app-test-hw.click (Route 53, external-dns)
           │ + AWS WAF          │    10 RPS/IP → 429, AWS managed rules → 403
           └─────────┬──────────┘
                     │ pod IPs (target-type ip)
@@ -91,11 +91,11 @@ Prerequisites: Terraform ≥ 1.17, AWS CLI (profile `default`), `gh`, Docker via
    ```
 2. **Bootstrap:** `export GITHUB_TOKEN=$(gh auth token) && make bootstrap`, then set the domain's name servers at
    the registrar to `terraform -chdir=terraform/bootstrap output name_servers` and wait for
-   `dig NS test-hw-app.click +short` to return them.
+   `dig NS app-test-hw.click +short` to return them.
 3. **Persistent:** `make plan STACK=persistent && make apply STACK=persistent`
 4. **First image:** `colima start --arch aarch64 && make image` (commit the updated image tag/digest in `gitops/apps/hello-world/values.yaml`), push to `main`
 5. **Cluster:** `make plan STACK=cluster && make apply STACK=cluster`, then `make kubeconfig`
-6. ArgoCD syncs everything; `https://app.test-hw-app.click` serves once the ALB and DNS are up.
+6. ArgoCD syncs everything; `https://app.app-test-hw.click` serves once the ALB and DNS are up.
 7. **Alarms + dashboard:** `make plan STACK=alarms && make apply STACK=alarms` (after the ALB exists; it's looked up
    by its IngressGroup tag). Confirm the SNS subscription email.
 

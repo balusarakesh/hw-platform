@@ -8,17 +8,16 @@
 variable "domain" {
   description = "Domain registered at an external registrar and delegated to this zone."
   type        = string
-  default     = "test-hw-app.click"
+  default     = "app-test-hw.click"
 }
 
 resource "aws_route53_zone" "main" {
   name    = var.domain
   comment = "${var.project}: delegated from the external registrar"
 
-  # Deleting the zone breaks delegation; recreating it gets new name servers.
-  lifecycle {
-    prevent_destroy = true
-  }
+  # Changing var.domain replaces the zone (new name servers to set at the registrar). The old zone
+  # still holds external-dns and ACM validation records, so allow deleting it with them.
+  force_destroy = true
 }
 
 output "name_servers" {
