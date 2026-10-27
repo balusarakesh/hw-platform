@@ -160,3 +160,30 @@ module "pod_identity_cloudwatch_observability" {
 
   attach_aws_cloudwatch_observability_policy = true
 }
+
+# External Secrets Operator: syncs only the hw/github/* and hw/argocd/* secrets (GitHub App key,
+# webhook secret, ArgoCD diff token) into Kubernetes Secrets for Atlantis and the PR runners.
+module "pod_identity_external_secrets" {
+  source  = "terraform-aws-modules/eks-pod-identity/aws"
+  version = "2.10.0"
+
+  name            = "${var.project}-external-secrets"
+  use_name_prefix = false
+
+  attach_external_secrets_policy = true
+  external_secrets_secrets_manager_arns = [
+    "arn:${local.partition}:secretsmanager:${var.region}:${local.account_id}:secret:hw/github/*",
+    "arn:${local.partition}:secretsmanager:${var.region}:${local.account_id}:secret:hw/argocd/*",
+  ]
+  external_secrets_kms_key_arns       = [local.p.data_kms_key_arn]
+  external_secrets_ssm_parameter_arns = []
+  external_secrets_create_permission  = false
+
+  associations = {
+    this = {
+      cluster_name    = module.eks.cluster_name
+      namespace       = "external-secrets"
+      service_account = "external-secrets"
+    }
+  }
+}

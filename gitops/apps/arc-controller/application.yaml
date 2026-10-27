@@ -1,0 +1,36 @@
+# Rendered by the helmfile plugin: `helmfile --selector name=arc-controller template`.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: arc-controller
+  namespace: argocd
+  annotations:
+    # Root app syncs the ARC controller (+ CRDs) before the runner scale set.
+    argocd.argoproj.io/sync-wave: "-1"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/balusarakesh/hw-platform.git
+    targetRevision: main
+    path: gitops
+    plugin:
+      name: helmfile
+      env:
+        - name: RELEASE
+          value: arc-controller
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: arc-systems
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true
+      - CreateNamespace=true
+    managedNamespaceMetadata:
+      labels:
+        pod-security.kubernetes.io/enforce: restricted
+        pod-security.kubernetes.io/warn: restricted

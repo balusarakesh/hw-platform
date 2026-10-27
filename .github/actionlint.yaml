@@ -1,0 +1,4 @@
+# actionlint: custom labels of our self-hosted runner scale sets (gitops/apps/arc-runners).
+self-hosted-runner:
+  labels:
+    - hw-runners

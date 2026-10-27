@@ -1,0 +1,135 @@
+# Values for the atlantis Helm release. `ref+awsssm://...` strings are resolved by helmfile (vals)
+# at render time from SSM /hw/gitops/*, which Terraform writes; nothing account-specific is in git.
+#
+# Atlantis plans terraform/{persistent,cluster,alarms} on every PR that touches them (projects in the
+# repo-root atlantis.yaml) and posts the plan as a PR comment; `atlantis apply` works only once the
+# PR is mergeable. IAM: Pod Identity role hw-atlantis (terraform/cluster/atlantis.tf).
+
+image:
+  repository: ghcr.io/runatlantis/atlantis
+  tag: v0.48.2@sha256:3dce75ec23cc57edd4d84a4f5f138b0af2abc43d2d6f394fc175c2eb43f953dc
+  pullPolicy: IfNotPresent
+
+atlantisUrl: "https://ref+awsssm://hw/gitops/atlantis_host+"
+
+# Only this repo; PRs from forks are never planned (allowForkPRs defaults to false, set explicitly).
+orgAllowlist: github.com/balusarakesh/hw-platform
+allowForkPRs: false
+
+# GitHub App hw-platform-bot. IDs aren't secret; the private key and webhook secret come from
+# AWS Secrets Manager through the ExternalSecret below (Secret atlantis-vcs: key.pem, github_secret).
+githubApp:
+  # Quoted: unquoted, Helm turns large integers into floats ("5.502882e+06").
+  id: "5502882"
+  installationId: "175990212"
+vcsSecretName: atlantis-vcs
+
+# Server-side repo config: the repo's atlantis.yaml can't loosen these.
+repoConfig: |
+  repos:
+    - id: github.com/balusarakesh/hw-platform
+      apply_requirements: [mergeable]
+      import_requirements: [mergeable]
+      allowed_overrides: []
+      allow_custom_workflows: false
+
+defaultTFVersion: 1.17.0
+
+# The chart's helm-test Pod (bats image) isn't needed and isn't digest-pinned.
+test:
+  enabled: false
+hidePrevPlanComments: true
+enableDiffMarkdownFormat: true
+
+environment:
+  AWS_REGION: us-east-2
+  # No ~/.aws profile here: the stacks fall back to the default credential chain (Pod Identity).
+  TF_VAR_aws_profile: ""
+  # The laptop uses the gitignored terraform/backend.hcl; Atlantis gets the same settings here.
+  TF_CLI_ARGS_init: "-backend-config=bucket=ref+awsssm://hw/gitops/tfstate_bucket+ -backend-config=region=us-east-2 -backend-config=encrypt=true -backend-config=use_lockfile=true -backend-config=kms_key_id=ref+awsssm://hw/gitops/tfstate_kms_key_arn+"
+
+serviceAccount:
+  create: true
+  name: atlantis
+  # Atlantis never calls the Kubernetes API with its SA (the cluster stack's helm provider uses an
+  # EKS token for the Pod Identity role), so don't mount the SA token.
+  mount: false
+
+# No EBS CSI driver in this cluster, so no PVC: repo checkouts, plans and locks live in an emptyDir
+# and are lost if the pod restarts (re-run `atlantis plan`). See docs/GAPS.md.
+volumeClaim:
+  enabled: false
+extraVolumes:
+  - name: atlantis-data
+    emptyDir:
+      sizeLimit: 4Gi
+extraVolumeMounts:
+  - name: atlantis-data
+    mountPath: /atlantis-data
+
+# PSA "restricted": non-root, no privilege escalation, no capabilities, read-only rootfs
+# (the chart mounts emptyDirs at /home/atlantis and /tmp when readOnlyRootFilesystem is set).
+statefulSet:
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 100
+    runAsGroup: 1000
+    fsGroup: 1000
+    fsGroupChangePolicy: OnRootMismatch
+    seccompProfile:
+      type: RuntimeDefault
+containerSecurityContext:
+  runAsNonRoot: true
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: [ALL]
+
+resources:
+  requests: { cpu: 100m, memory: 256Mi }
+  limits: { cpu: "1", memory: 1536Mi }
+
+# Webhook endpoint only (/events) on the shared ALB. WAF (terraform/persistent/waf.tf) only lets
+# GitHub's hook IP ranges reach this host; the UI stays private (kubectl port-forward).
+ingress:
+  enabled: true
+  ingressClassName: alb
+  host: "ref+awsssm://hw/gitops/atlantis_host"
+  path: /events
+  pathType: Prefix
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/group.name: hw
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
+    alb.ingress.kubernetes.io/ssl-redirect: "443"
+    alb.ingress.kubernetes.io/certificate-arn: "ref+awsssm://hw/gitops/acm_certificate_arn"
+    alb.ingress.kubernetes.io/ssl-policy: ELBSecurityPolicy-TLS13-1-2-2021-06
+    alb.ingress.kubernetes.io/healthcheck-path: /healthz
+    alb.ingress.kubernetes.io/wafv2-acl-arn: "ref+awsssm://hw/gitops/waf_acl_arn"
+    external-dns.alpha.kubernetes.io/hostname: "ref+awsssm://hw/gitops/atlantis_host"
+
+extraManifests:
+  # Private key + webhook secret from AWS Secrets Manager (ClusterSecretStore in apps/external-secrets).
+  - apiVersion: external-secrets.io/v1
+    kind: ExternalSecret
+    metadata:
+      name: atlantis-vcs
+      annotations:
+        argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+    spec:
+      refreshInterval: 1h
+      secretStoreRef:
+        kind: ClusterSecretStore
+        name: aws-secrets-manager
+      target:
+        name: atlantis-vcs
+        creationPolicy: Owner
+      data:
+        - secretKey: key.pem
+          remoteRef:
+            key: hw/github/app
+            property: private_key
+        - secretKey: github_secret
+          remoteRef:
+            key: hw/github/webhook-secret

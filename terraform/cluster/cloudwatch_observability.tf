@@ -159,9 +159,16 @@ locals {
 # and infinite retention. Pre-creating them keeps logs encrypted (data CMK) and bounded.
 resource "aws_cloudwatch_log_group" "container_insights" {
   #checkov:skip=CKV_AWS_338:14-day retention is a deliberate cost choice for a demo on a $100/month account (GAPS)
-  for_each = toset(["application", "dataplane", "host", "performance"])
+  # "prometheus" holds the EMF from the cloudwatch-agent-prometheus scraper.
+  for_each = toset(["application", "dataplane", "host", "performance", "prometheus"])
 
   name              = "/aws/containerinsights/${var.project}/${each.key}"
   retention_in_days = var.log_retention_days
   kms_key_id        = local.p.data_kms_key_arn
+}
+
+# The scraper created this group on first write (unencrypted, no expiry) before it was managed here.
+import {
+  to = aws_cloudwatch_log_group.container_insights["prometheus"]
+  id = "/aws/containerinsights/hw/prometheus"
 }

@@ -1,0 +1,13 @@
+apiVersion: v2
+name: arc-runners
+description: >-
+  Self-hosted GitHub Actions runners (scale set "hw-runners") for the ArgoCD PR diff workflow.
+  Wraps the upstream gha-runner-scale-set chart because it has no extraObjects hook and its
+  controller lookup() returns nothing under `helm template` (ArgoCD); this wrapper adds the
+  ExternalSecrets the runners need.
+type: application
+version: 0.1.0
+dependencies:
+  - name: gha-runner-scale-set
+    version: 0.15.1
+    repository: oci://ghcr.io/actions/actions-runner-controller-charts

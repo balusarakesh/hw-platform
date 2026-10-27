@@ -1,5 +1,7 @@
+# aws_profile = "" (Atlantis) means: no named profile, use the default credential chain
+# (Atlantis gets credentials from its Pod Identity role).
 provider "aws" {
-  profile = var.aws_profile
+  profile = var.aws_profile == "" ? null : var.aws_profile
   region  = var.region
 
   default_tags {
@@ -12,16 +14,17 @@ provider "aws" {
   }
 }
 
-# Short-lived token from `aws eks get-token`; nothing cluster-related is written to disk.
+# Short-lived EKS token from an ephemeral resource: never written to state or plan files, and
+# no `aws` CLI needed (the Atlantis image doesn't ship one).
+ephemeral "aws_eks_cluster_auth" "this" {
+  name = module.eks.cluster_name
+}
+
 provider "helm" {
   kubernetes = {
     host                   = module.eks.cluster_endpoint
     cluster_ca_certificate = base64decode(module.eks.cluster_certificate_authority_data)
-    exec = {
-      api_version = "client.authentication.k8s.io/v1beta1"
-      command     = "aws"
-      args        = ["eks", "get-token", "--cluster-name", module.eks.cluster_name, "--region", var.region, "--profile", var.aws_profile]
-    }
+    token                  = ephemeral.aws_eks_cluster_auth.this.token
   }
 }
 
@@ -40,7 +43,7 @@ data "terraform_remote_state" "persistent" {
     bucket  = "${var.project}-tfstate-${local.account_id}-${var.region}"
     key     = "persistent/terraform.tfstate"
     region  = var.region
-    profile = var.aws_profile
+    profile = var.aws_profile == "" ? null : var.aws_profile
   }
 }
 

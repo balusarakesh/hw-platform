@@ -1,0 +1,33 @@
+# Rendered by the helmfile plugin: `helmfile --selector name=atlantis template`.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: atlantis
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/balusarakesh/hw-platform.git
+    targetRevision: main
+    path: gitops
+    plugin:
+      name: helmfile
+      env:
+        - name: RELEASE
+          value: atlantis
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: atlantis
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true
+      - CreateNamespace=true
+    managedNamespaceMetadata:
+      labels:
+        pod-security.kubernetes.io/enforce: restricted
+        pod-security.kubernetes.io/warn: restricted

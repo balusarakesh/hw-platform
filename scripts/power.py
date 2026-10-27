@@ -42,8 +42,10 @@ APP_URL = "https://app.app-test-hw.click"
 AUTOSYNC_PAUSED_ANNOTATION = "hw/power-autosync-disabled"
 CA_APP = "cluster-autoscaler"  # ArgoCD Application that owns the Cluster Autoscaler deployment
 ROOT_APP = "root"  # app-of-apps (installed by Terraform) that manages every Application, incl. CA_APP
-SAVED_SCALING_TAG = "hw/power-saved-scaling"  # value "min:desired:max" (EKS tag values can't hold commas)
-DEFAULT_SCALING = (0, 2, 3)  # Terraform defaults, used if the tag is missing
+# Saved node group size, "min:desired:max". In SSM rather than a node group tag: Terraform owns the
+# node group's tags, so an apply while powered down would delete a tag.
+SAVED_SCALING_PARAM = "/hw/power/saved-scaling"
+DEFAULT_SCALING = (0, 2, 3)  # Terraform defaults, used if nothing was saved
 AURORA_AUTOSTART_DAYS = 7  # AWS restarts a stopped Aurora cluster after 7 days
 
 # Rough on-demand prices in us-east-2 (USD/hour), from the public AWS pricing pages (Oct 2026).
@@ -159,23 +161,23 @@ def update_scaling(aws: Aws, ng: dict, min_size: int, desired: int, max_size: in
 def save_scaling(aws: Aws, ng: dict, yes: bool) -> None:
     sc = ng["scalingConfig"]
     if sc["desiredSize"] == 0:
-        log.info("node group already at 0; keeping the previously saved scaling tag")
+        log.info("node group already at 0; keeping the previously saved scaling")
         return
     value = f"{sc['minSize']}:{sc['desiredSize']}:{sc['maxSize']}"
     act(
         yes,
-        f"save current scaling ({value}) as tag {SAVED_SCALING_TAG}",
-        lambda: aws.client("eks").tag_resource(resourceArn=ng["nodegroupArn"], tags={SAVED_SCALING_TAG: value}),
+        f"save current scaling ({value}) to SSM {SAVED_SCALING_PARAM}",
+        lambda: aws.client("ssm").put_parameter(Name=SAVED_SCALING_PARAM, Value=value, Type="String", Overwrite=True),
     )
 
 
-def saved_scaling(ng: dict) -> tuple[int, int, int]:
-    raw = ng.get("tags", {}).get(SAVED_SCALING_TAG)
+def saved_scaling(aws: Aws) -> tuple[int, int, int]:
     try:
+        raw = aws.client("ssm").get_parameter(Name=SAVED_SCALING_PARAM)["Parameter"]["Value"]
         lo, desired, hi = (int(x) for x in raw.split(":"))
         return lo, desired, hi
-    except (AttributeError, ValueError):
-        log.warning("no valid %s tag; using Terraform defaults %s", SAVED_SCALING_TAG, DEFAULT_SCALING)
+    except (ClientError, ValueError):
+        log.warning("no valid %s; using Terraform defaults %s", SAVED_SCALING_PARAM, DEFAULT_SCALING)
         return DEFAULT_SCALING
 
 
@@ -245,6 +247,31 @@ def scale_cluster_autoscaler(aws: Aws, replicas: int, yes: bool) -> None:
             raise
 
     act(yes, f"scale kube-system/cluster-autoscaler to {replicas}", scale)
+
+
+def drain_nodes(aws: Aws, yes: bool) -> None:
+    """Cordon every node and delete its non-DaemonSet pods, bypassing PodDisruptionBudgets.
+
+    PDBs protect a service from *voluntary* disruption while it keeps running; on a deliberate full
+    power-down they can't be satisfied (there's nowhere to reschedule) and only make EKS wait ~15 min
+    per node before force-terminating it. The replacement pods simply stay Pending until `up`.
+    """
+
+    def drain() -> None:
+        _, core, _ = k8s_api(aws)
+        for node in core.list_node().items:
+            name = node.metadata.name
+            core.patch_node(name, {"spec": {"unschedulable": True}})
+            pods = core.list_pod_for_all_namespaces(field_selector=f"spec.nodeName={name}").items
+            for pod in pods:
+                owners = pod.metadata.owner_references or []
+                if any(o.kind == "DaemonSet" for o in owners):
+                    continue  # DaemonSet pods go away with the node
+                core.delete_namespaced_pod(pod.metadata.name, pod.metadata.namespace)
+            log.info("drained %s (%d pods deleted)", name, sum(
+                1 for p in pods if not any(o.kind == "DaemonSet" for o in (p.metadata.owner_references or []))))
+
+    act(yes, "cordon all nodes and delete their pods (bypassing PDBs)", drain)
 
 
 def get_app(aws: Aws, name: str) -> Optional[dict]:
@@ -414,8 +441,18 @@ def http_ok(url: str) -> bool:
 
 
 def cmd_down(aws: Aws, yes: bool) -> int:
+    start = time.monotonic()
     set_alarm_actions(aws, enabled=False, yes=yes)
+    # Aurora takes ~15 min to stop; run it alongside the node scale-down.
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [pool.submit(stop_aurora, aws, yes), pool.submit(scale_down_nodes, aws, yes)]
+        for f in futures:
+            f.result()  # re-raise errors from either thread
+    log.info("done in %.1f min", (time.monotonic() - start) / 60)
+    return 0
 
+
+def scale_down_nodes(aws: Aws, yes: bool) -> None:
     ng = find_nodegroup(aws)
     if ng is None:
         log.info("node group %s* not found in cluster %s; skipping nodes", NODEGROUP_PREFIX, CLUSTER)
@@ -425,6 +462,7 @@ def cmd_down(aws: Aws, yes: bool) -> int:
         pause_autosync(aws, CA_APP, yes)
         scale_cluster_autoscaler(aws, 0, yes)
         save_scaling(aws, ng, yes)
+        drain_nodes(aws, yes)
         sc = ng["scalingConfig"]
         if sc["desiredSize"] == 0 and sc["minSize"] == 0:
             log.info("node group already scaled to 0")
@@ -438,16 +476,13 @@ def cmd_down(aws: Aws, yes: bool) -> int:
                           "drain: check `kubectl get pdb -A` and `kubectl get pods -A -o wide`.")
         handle_strays(aws, yes)
 
-    stop_aurora(aws, yes)
-    return 0
-
 
 def restore_nodes(aws: Aws, yes: bool) -> None:
     ng = find_nodegroup(aws)
     if ng is None:
         log.info("node group %s* not found; skipping nodes", NODEGROUP_PREFIX)
         return
-    lo, desired, hi = saved_scaling(ng)
+    lo, desired, hi = saved_scaling(aws)
     sc = ng["scalingConfig"]
     if (sc["minSize"], sc["desiredSize"], sc["maxSize"]) == (lo, desired, hi):
         log.info("node group already at %s:%s:%s", lo, desired, hi)
@@ -520,9 +555,9 @@ def cmd_status(aws: Aws) -> int:
     else:
         sc = ng["scalingConfig"]
         instances = asg_instances(aws, ng)
-        log.info("node group %s: min=%s desired=%s max=%s, %d instance(s), saved tag=%s",
+        log.info("node group %s: min=%s desired=%s max=%s, %d instance(s), saved scaling=%s",
                  ng["nodegroupName"], sc["minSize"], sc["desiredSize"], sc["maxSize"], len(instances),
-                 ng.get("tags", {}).get(SAVED_SCALING_TAG, "-"))
+                 ":".join(map(str, saved_scaling(aws))))
         hourly += len(instances) * PRICES["t4g.medium"]
         try:
             for name in (ROOT_APP, CA_APP):

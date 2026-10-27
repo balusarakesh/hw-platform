@@ -1,0 +1,31 @@
+# Atlantis projects: one per Terraform stack. A PR that touches a stack (or a module it uses) gets
+# an automatic `terraform plan` comment; `atlantis apply` is allowed only once the PR is mergeable.
+# That requirement lives in the server-side repo config (gitops/apps/atlantis/values.yaml), which
+# doesn't allow this file to override it.
+#
+# terraform/bootstrap is deliberately absent: it manages the state bucket and the GitHub repo
+# (GitHub provider token) and is only ever applied from a laptop.
+version: 3
+automerge: false
+parallel_plan: true
+parallel_apply: false
+
+projects:
+  - name: persistent
+    dir: terraform/persistent
+    autoplan:
+      enabled: true
+      when_modified: ["*.tf", "../modules/**/*.tf", ".terraform.lock.hcl"]
+
+  - name: cluster
+    dir: terraform/cluster
+    autoplan:
+      enabled: true
+      # The cluster stack also reads the ArgoCD bootstrap values from gitops/.
+      when_modified: ["*.tf", "../modules/**/*.tf", ".terraform.lock.hcl", "../../gitops/apps/argocd/values.yaml"]
+
+  - name: alarms
+    dir: terraform/alarms
+    autoplan:
+      enabled: true
+      when_modified: ["*.tf", "../modules/**/*.tf", ".terraform.lock.hcl"]

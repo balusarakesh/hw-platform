@@ -6,6 +6,10 @@ terraform {
       source  = "hashicorp/aws"
       version = "= 6.70.0"
     }
+    http = {
+      source  = "hashicorp/http"
+      version = "= 3.6.3"
+    }
   }
 
   backend "s3" {

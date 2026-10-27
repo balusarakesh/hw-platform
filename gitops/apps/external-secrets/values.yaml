@@ -1,0 +1,46 @@
+# External Secrets Operator: copies hw/github/* and hw/argocd/* from AWS Secrets Manager into
+# Kubernetes Secrets (Pod Identity role; terraform/cluster/pod_identity.tf). Nothing secret is in git.
+installCRDs: true
+
+image:
+  repository: ghcr.io/external-secrets/external-secrets
+  tag: v2.14.0@sha256:10608eb53e636e744903d5f3657a4d9c44e28d9d9c181b73e07bc7dd2e6884dc
+webhook:
+  image:
+    repository: ghcr.io/external-secrets/external-secrets
+    tag: v2.14.0@sha256:10608eb53e636e744903d5f3657a4d9c44e28d9d9c181b73e07bc7dd2e6884dc
+  resources:
+    requests: { cpu: 10m, memory: 32Mi }
+    limits: { cpu: 100m, memory: 128Mi }
+certController:
+  image:
+    repository: ghcr.io/external-secrets/external-secrets
+    tag: v2.14.0@sha256:10608eb53e636e744903d5f3657a4d9c44e28d9d9c181b73e07bc7dd2e6884dc
+  resources:
+    requests: { cpu: 10m, memory: 32Mi }
+    limits: { cpu: 100m, memory: 128Mi }
+
+serviceAccount:
+  create: true
+  # IAM via Pod Identity association (Terraform).
+  name: external-secrets
+
+resources:
+  requests: { cpu: 10m, memory: 48Mi }
+  limits: { cpu: 200m, memory: 192Mi }
+
+# One store for the whole cluster, authenticated by the controller's Pod Identity role.
+# ExternalSecrets live next to the workloads that use them (atlantis, arc-runners).
+extraObjects:
+  - apiVersion: external-secrets.io/v1
+    kind: ClusterSecretStore
+    metadata:
+      name: aws-secrets-manager
+      annotations:
+        # CRDs are installed by this same release; let ArgoCD apply this after them.
+        argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+    spec:
+      provider:
+        aws:
+          service: SecretsManager
+          region: us-east-2

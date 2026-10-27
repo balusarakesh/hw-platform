@@ -1,0 +1,127 @@
+# Comment `argocd app diff` for every app on PRs that touch gitops/**: what ArgoCD would change in the
+# cluster if this PR were merged. Runs on the in-cluster runner scale set (gitops/apps/arc-runners) so the
+# ArgoCD API stays private; the runner only holds a read-only ArgoCD token (local account pr-diff).
+name: gitops-diff
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - "gitops/**"
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: gitops-diff-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  diff:
+    # Self-hosted runners on a public repo: never run code from forks.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: hw-runners
+    timeout-minutes: 15
+    env:
+      ARGOCD_VERSION: v3.5.5 # matches the server (gitops/apps/argocd/values.yaml)
+      ARGOCD_SHA256: 13f423b9014e212a3e0052b7826e1d6b95ee5ac156f2436fc856f2eb8c827537 # argocd-linux-arm64
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install argocd CLI
+        run: |
+          curl -sSfL -o "$RUNNER_TEMP/argocd" \
+            "https://github.com/argoproj/argo-cd/releases/download/${ARGOCD_VERSION}/argocd-linux-arm64"
+          echo "${ARGOCD_SHA256}  $RUNNER_TEMP/argocd" | sha256sum -c -
+          chmod +x "$RUNNER_TEMP/argocd"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+
+      - name: Diff every app against the PR revision
+        # ARGOCD_SERVER and ARGOCD_AUTH_TOKEN come from the runner pod (arc-runners values + ExternalSecret).
+        run: |
+          set -uo pipefail
+          out="$RUNNER_TEMP/comment.md"
+          per_app_limit=15000
+          {
+            echo "<!-- hw-gitops-diff -->"
+            echo "### ArgoCD diff for \`${HEAD_SHA:0:7}\`"
+            echo
+          } > "$out"
+
+          if [ -z "${ARGOCD_AUTH_TOKEN:-}" ]; then
+            echo ":warning: Runner has no ArgoCD token yet; run \`scripts/argocd-pr-diff-token.sh\`." >> "$out"
+            exit 0
+          fi
+
+          unchanged=()
+          for dir in gitops/apps/*/; do
+            app="$(basename "$dir")"
+            # --insecure: in-cluster call to argocd-server, which uses ArgoCD's self-signed certificate.
+            diff="$(argocd app diff "$app" --revision "$HEAD_SHA" \
+              --server "$ARGOCD_SERVER" --grpc-web --insecure 2>&1)"
+            rc=$?
+            case "$rc" in
+              0) unchanged+=("$app") ;;
+              1)
+                if [ "${#diff}" -gt "$per_app_limit" ]; then
+                  diff="${diff:0:$per_app_limit}"$'\n... (truncated)'
+                fi
+                {
+                  echo "<details><summary><b>${app}</b>: changes</summary>"
+                  echo
+                  echo '```diff'
+                  echo "$diff"
+                  echo '```'
+                  echo "</details>"
+                  echo
+                } >> "$out"
+                ;;
+              *)
+                # The read-only role can't distinguish "missing" from "forbidden", so both mean
+                # the Application doesn't exist yet (new app: the root app creates it on merge).
+                if grep -qiE 'not found|permission denied' <<< "$diff"; then
+                  echo "- **${app}**: not in the cluster yet (new app, created on merge)" >> "$out"
+                else
+                  {
+                    echo "<details><summary><b>${app}</b>: :x: diff failed (exit ${rc})</summary>"
+                    echo
+                    echo '```'
+                    echo "${diff:0:4000}"
+                    echo '```'
+                    echo "</details>"
+                    echo
+                  } >> "$out"
+                fi
+                ;;
+            esac
+          done
+
+          if [ "${#unchanged[@]}" -gt 0 ]; then
+            echo "**No changes:** ${unchanged[*]}" >> "$out"
+          fi
+          echo >> "$out"
+          echo "<sub>Live cluster vs. what ArgoCD renders at this commit. Changes to an app's application.yaml itself are applied by the root app and not shown here.</sub>" >> "$out"
+
+      - name: Create or update the PR comment
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const fs = require('fs');
+            const marker = '<!-- hw-gitops-diff -->';
+            let body = fs.readFileSync(`${process.env.RUNNER_TEMP}/comment.md`, 'utf8');
+            // GitHub's limit is 65536 characters per comment.
+            if (body.length > 65000) body = body.slice(0, 65000) + '\n\n... (comment truncated)';
+            const { owner, repo } = context.repo;
+            const issue_number = context.payload.pull_request.number;
+            const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number });
+            const existing = comments.find(c => c.body && c.body.startsWith(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }
