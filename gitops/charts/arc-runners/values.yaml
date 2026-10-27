@@ -1,0 +1,5 @@
+# Defaults; environment values come from gitops/apps/arc-runners/values.yaml.
+secretStore: aws-secrets-manager
+githubAppSecretKey: hw/github/app
+argocdTokenSecretKey: hw/argocd/pr-diff-token
+gha-runner-scale-set: {}

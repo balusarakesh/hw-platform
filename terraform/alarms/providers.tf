@@ -3,7 +3,7 @@
 # keeps it), so this stack only needs re-applying if the IngressGroup is recreated.
 
 provider "aws" {
-  profile = var.aws_profile
+  profile = var.aws_profile == "" ? null : var.aws_profile
   region  = var.region
 
   default_tags {
@@ -28,7 +28,7 @@ data "terraform_remote_state" "persistent" {
     bucket  = local.state_bucket
     key     = "persistent/terraform.tfstate"
     region  = var.region
-    profile = var.aws_profile
+    profile = var.aws_profile == "" ? null : var.aws_profile
   }
 }
 
@@ -38,7 +38,7 @@ data "terraform_remote_state" "cluster" {
     bucket  = local.state_bucket
     key     = "cluster/terraform.tfstate"
     region  = var.region
-    profile = var.aws_profile
+    profile = var.aws_profile == "" ? null : var.aws_profile
   }
 }
 

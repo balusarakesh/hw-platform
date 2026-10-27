@@ -39,6 +39,20 @@ service control policies cap what even the account's admin can do. Each restrict
   - *Fix:* split roles per stack, plan-only role on PRs, permission boundaries, and run Atlantis outside the cluster it manages.
 - **Atlantis runs in the cluster it manages** (chicken-and-egg). Bootstrap and disaster recovery are done with a local `terraform apply`.
 - **ArgoCD bootstrap chicken-and-egg.** Terraform installs ArgoCD and the root app once (helm_release). ArgoCD then manages itself and everything else from `gitops/`.
+- **Atlantis keeps state in an emptyDir** (no EBS CSI driver): repo checkouts, saved plans and PR locks are lost
+  if the pod restarts; re-run `atlantis plan`. *Fix:* EBS CSI driver + PVC, or Redis locking + shared plan dir.
+- **Atlantis' webhook allowlist is GitHub's published `hooks` ranges**, read at plan time from api.github.com/meta;
+  if GitHub adds ranges, deliveries are blocked until the next persistent apply.
+- **The PR that installs Atlantis / the diff runners can't comment on itself** (they don't exist until it merges);
+  it was applied from a laptop. Every later PR gets comments.
+- **In-cluster runners call `argocd-server` with `--insecure`** (ArgoCD's self-signed cert). *Fix:* cert-manager
+  issued internal certificate.
+- **The ArgoCD diff doesn't cover changes to an app's own `application.yaml`** (applied by the root app). *Fix:*
+  also diff `root`.
+- **The `pr-diff` ArgoCD token doesn't expire**; rotation is manual (`scripts/argocd-pr-diff-token.sh`).
+- **EKS addons are pinned** (no `most_recent`) so new eksbuild releases don't show up as surprise plan diffs; they
+  must be bumped deliberately. The node AMI still follows the latest release (security patches), which shows up
+  as a node group update in plans.
 - **Self-hosted runners on a public repo.** They are limited to same-repo PRs, fork workflows need approval, and the runner has read-only RBAC. A malicious collaborator could still run code in-cluster.
 - **Image bumps need a human merge.** CI opens a PR to `gitops/`, so deploys aren't fully continuous.
   - *Why:* this is deliberate, so every prod change gets an ArgoCD diff and a review.
@@ -59,6 +73,9 @@ service control policies cap what even the account's admin can do. Each restrict
 - **`/hw/admin_cidrs` (home IP)** is set by hand and must be updated when the home IP changes.
 
 ## Security
+- **Operator credentials:** the laptop `default` profile is the account's `admin` IAM user with a long-lived
+  access key (pre-existing, not created by this repo; nothing in the cluster or CI uses static keys).
+  *Fix:* IAM Identity Center / `aws login` short-lived credentials, delete the key.
 - **The EKS public endpoint is enabled,** restricted to my home IP.
   - *Fix:* private-only endpoint plus a VPN, SSM bastion or Client VPN.
 - **The Atlantis webhook is public,** restricted to GitHub hook CIDRs and protected by a webhook secret.
@@ -94,6 +111,9 @@ service control policies cap what even the account's admin can do. Each restrict
   transfer, LCUs, storage and snapshots.
 - **Aurora auto-starts after 7 days stopped** (AWS limit). `power.py status` warns about this, but nothing re-stops it automatically.
   - *Fix:* an EventBridge rule that re-stops it.
+- **`power.py` saves the node group size in SSM** (`/hw/power/saved-scaling`), not a tag, because Terraform
+  owns the node group tags. It drains nodes itself (bypassing PDBs) on `down`: PDBs can't be satisfied on a full
+  shutdown and only made EKS wait ~15 min per node.
 - **`power.py` scales the node group outside Terraform.** The EKS module ignores `desired_size` changes, so there's no drift. `min_size` is 0 in Terraform for the same reason.
 - **Alarms depend on the controller-created ALB.** The ALB is long-lived, but if the Ingress or IngressGroup is ever recreated, the `alarms` stack must be re-applied.
   - *Fix:* a Terraform-owned ALB + TargetGroupBinding.

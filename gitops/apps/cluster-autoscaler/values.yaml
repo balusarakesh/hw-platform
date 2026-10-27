@@ -6,6 +6,10 @@ autoDiscovery:
   clusterName: "ref+awsssm://hw/gitops/cluster_name"
 awsRegion: "ref+awsssm://hw/gitops/region"
 
+# Fixed object names (the chart's default is "<release>-aws-cluster-autoscaler"); scripts/power.py
+# scales this Deployment by name.
+fullnameOverride: cluster-autoscaler
+
 image:
   repository: registry.k8s.io/autoscaling/cluster-autoscaler
   # Must match the Kubernetes minor version (EKS 1.36).

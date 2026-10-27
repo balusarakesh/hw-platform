@@ -33,3 +33,6 @@ __pycache__/
 .DS_Store
 .idea/
 .vscode/
+
+# Helm dependency archives (rebuilt from Chart.lock by helmfile)
+gitops/charts/*/charts/

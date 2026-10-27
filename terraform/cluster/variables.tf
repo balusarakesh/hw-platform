@@ -1,5 +1,5 @@
 variable "aws_profile" {
-  description = "Local AWS CLI profile Terraform authenticates with."
+  description = "Local AWS CLI profile; \"\" (Atlantis) uses the default credential chain instead."
   type        = string
   default     = "default"
 }

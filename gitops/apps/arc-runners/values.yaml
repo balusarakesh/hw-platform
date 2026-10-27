@@ -1,0 +1,71 @@
+# Runner scale set "hw-runners": ephemeral, in-cluster GitHub Actions runners used only by
+# .github/workflows/gitops-diff.yml, so ArgoCD's API never has to be reachable from the internet.
+# Runner pods get no AWS role and no Kubernetes API access; they only call ArgoCD with a read-only token.
+gha-runner-scale-set:
+  githubConfigUrl: https://github.com/balusarakesh/hw-platform
+  # Kubernetes Secret written by the github-app ExternalSecret (GitHub App id, installation id, key).
+  githubConfigSecret: github-app
+  runnerScaleSetName: hw-runners
+
+  minRunners: 0
+  maxRunners: 2
+
+  # The chart normally finds the controller with lookup(), which returns nothing under ArgoCD's
+  # `helm template`; name it explicitly (fullnameOverride in apps/arc-controller/values.yaml).
+  controllerServiceAccount:
+    namespace: arc-systems
+    name: arc-controller
+
+  listenerTemplate:
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: listener
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { cpu: 100m, memory: 128Mi }
+
+  # No containerMode: jobs run directly in the runner container (no Docker, no privileged sidecar).
+  template:
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: runner
+          image: ghcr.io/actions/actions-runner:2.338.2@sha256:759a1d94a15b05941aba5196974ff43fe15b4cbba29b694b35cbc32a1166b232
+          command: ["/home/runner/run.sh"]
+          env:
+            - name: ARGOCD_SERVER
+              value: argocd-server.argocd.svc.cluster.local:443
+            # Read-only ArgoCD token; optional so runners start before the token exists.
+            - name: ARGOCD_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: argocd-pr-diff-token
+                  key: token
+                  optional: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            # The runner writes its config, _work and _diag under /home/runner.
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { cpu: "1", memory: 1Gi }

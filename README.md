@@ -66,6 +66,18 @@ IAM database auth, deployed by **ArgoCD + helmfile**, all provisioned with **Ter
   `Retry-After: 60`; AWS managed Common + Known Bad Inputs rule groups answer **403** (verified: Log4Shell
   header and path traversal blocked). Blocked requests are logged to `aws-waf-logs-hw-app`; the
   `hw-waf-rate-limited` alarm fires when the limit is being hit.
+- **Terraform via PRs (Atlantis).** Atlantis runs in-cluster (`gitops/apps/atlantis`, GitHub App `hw-platform-bot`)
+  and plans `terraform/{persistent,cluster,alarms}` on every PR that touches them (`atlantis.yaml`), posting the
+  plan as a PR comment; `atlantis apply` only once the PR is mergeable (enforced in the server-side repo config).
+  Its webhook endpoint `https://atlantis.app-test-hw.click/events` shares the ALB, and a WAF rule only admits
+  GitHub's hook IP ranges (from api.github.com/meta). Backend settings come from SSM via `TF_CLI_ARGS_init`;
+  credentials from the `hw-atlantis` Pod Identity role. `terraform/bootstrap` stays laptop-only.
+- **GitOps PR diffs.** PRs touching `gitops/**` get one comment with `argocd app diff` per app, made by in-cluster
+  GitHub Actions runners (ARC scale set `hw-runners`) using a read-only ArgoCD account (`pr-diff`, applications
+  `get` only). ArgoCD's API stays private. Runner pods are non-root, have no AWS role and no Kubernetes token, and
+  only run PRs from this repo.
+- **Secrets in the cluster.** External Secrets Operator (Pod Identity role limited to `hw/github/*` and
+  `hw/argocd/*`) syncs the GitHub App key, webhook secret and ArgoCD diff token from Secrets Manager.
 - **Observability.** The `amazon-cloudwatch-observability` EKS addon runs Container Insights (enhanced) and
   Fluent Bit (all pod logs → KMS-encrypted CloudWatch log groups with 14-day retention). A second CloudWatch agent
   (`cloudwatch-agent-prometheus`, one replica) scrapes pods labelled `hw.io/scrape=true`: the app's `/metrics`
@@ -138,6 +150,9 @@ ArgoCD UI: `kubectl -n argocd port-forward svc/argocd-server 8443:443` (never ex
 - **node-exporter** uses `hostNetwork`/`hostPID` to read node conntrack and NIC (ENA) counters. Its namespace
   (`node-exporter`) is PSA `privileged` (warn: restricted); the pod runs as uid 65534, no capabilities,
   read-only rootfs, no host root filesystem mount.
+- **Atlantis has AdministratorAccess** (Pod Identity role `hw-atlantis`) plus EKS cluster-admin, because it applies
+  stacks that manage IAM/KMS/EKS/RDS. Limited to this repo, same-repo PRs, mergeable-only applies, webhook secret
+  and a GitHub-only WAF rule; see GAPS for hardening.
 - **AWS-managed EKS addons run as root / privileged** (they manage node networking, credentials and logs).
   Output of a scan of the live cluster (`kubectl get pods -A -o json`, containers that are privileged or don't
   prevent root):

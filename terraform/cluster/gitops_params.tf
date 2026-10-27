@@ -4,6 +4,12 @@
 # None of these are secrets; the sensitive params (/hw/admin_cidrs, /hw/alert_email) live
 # outside /hw/gitops/ so the repo-server role can't read them.
 
+# Terraform state location, for Atlantis' `terraform init -backend-config=...` (the laptop uses the
+# gitignored terraform/backend.hcl instead). The key ARN is resolved from the bootstrap alias.
+data "aws_kms_alias" "tfstate" {
+  name = "alias/${var.project}-tfstate"
+}
+
 locals {
   gitops_params = {
     region               = var.region
@@ -21,6 +27,9 @@ locals {
     db_master_username   = local.p.aurora_master_username
     db_master_secret_arn = local.p.aurora_master_secret_arn
     waf_acl_arn          = local.p.waf_acl_arn
+    atlantis_host        = "atlantis.${local.p.domain}"
+    tfstate_bucket       = "${var.project}-tfstate-${local.account_id}-${var.region}"
+    tfstate_kms_key_arn  = data.aws_kms_alias.tfstate.target_key_arn
   }
 }
 

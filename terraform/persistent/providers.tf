@@ -1,5 +1,6 @@
+# aws_profile = "" (Atlantis) means: no named profile, use the default credential chain.
 provider "aws" {
-  profile = var.aws_profile
+  profile = var.aws_profile == "" ? null : var.aws_profile
   region  = var.region
 
   default_tags {

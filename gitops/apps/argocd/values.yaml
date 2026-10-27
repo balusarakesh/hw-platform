@@ -16,6 +16,13 @@ configs:
     timeout.reconciliation: 180s
     # No `kubectl exec` from the UI.
     exec.enabled: "false"
+    # Local account for the PR diff workflow: API key only (no UI/CLI login), read-only via rbac below.
+    accounts.pr-diff: apiKey
+  # pr-diff may only read applications (enough for `argocd app diff`); everyone else keeps the defaults.
+  rbac:
+    policy.csv: |
+      p, role:pr-diff, applications, get, */*, allow
+      g, pr-diff, role:pr-diff
   params:
     # UI/API is only reachable via `kubectl port-forward`, never an Ingress.
     server.insecure: "false"

@@ -8,6 +8,20 @@ locals {
   admin_cidrs = sensitive(split(",", data.aws_ssm_parameter.admin_cidrs.value))
 }
 
+# Addon versions are pinned (most_recent = false) so new eksbuild releases don't show up as surprise
+# diffs in every Atlantis plan; bump them here deliberately (aws eks describe-addon-versions).
+locals {
+  addon_versions = {
+    "vpc-cni"                         = "v1.23.2-eksbuild.8"
+    "eks-pod-identity-agent"          = "v1.4.1-eksbuild.3"
+    "coredns"                         = "v1.14.7-eksbuild.22"
+    "kube-proxy"                      = "v1.36.0-eksbuild.58"
+    "metrics-server"                  = "v0.9.0-eksbuild.14"
+    "eks-node-monitoring-agent"       = "v1.7.5-eksbuild.1"
+    "amazon-cloudwatch-observability" = "v6.7.0-eksbuild.1"
+  }
+}
+
 module "eks" {
   source  = "terraform-aws-modules/eks/aws"
   version = "21.29.0"
@@ -42,6 +56,8 @@ module "eks" {
 
   addons = {
     vpc-cni = {
+      addon_version  = local.addon_versions["vpc-cni"]
+      most_recent    = false
       before_compute = true
       configuration_values = jsonencode({
         # Prefix delegation lifts the t4g.medium pod limit from 17 to 110.
@@ -55,18 +71,34 @@ module "eks" {
     }
     # Node agent that hands pods their IAM credentials (Pod Identity).
     eks-pod-identity-agent = {
+      addon_version  = local.addon_versions["eks-pod-identity-agent"]
+      most_recent    = false
       before_compute = true
     }
-    coredns    = {}
-    kube-proxy = {}
+    coredns = {
+      addon_version = local.addon_versions["coredns"]
+      most_recent   = false
+    }
+    kube-proxy = {
+      addon_version = local.addon_versions["kube-proxy"]
+      most_recent   = false
+    }
     # Resource metrics API (CPU/memory) that the HorizontalPodAutoscaler reads.
-    metrics-server = {}
+    metrics-server = {
+      addon_version = local.addon_versions["metrics-server"]
+      most_recent   = false
+    }
     # Detects node health issues (kernel, network, runtime) and feeds node auto repair.
-    eks-node-monitoring-agent = {}
+    eks-node-monitoring-agent = {
+      addon_version = local.addon_versions["eks-node-monitoring-agent"]
+      most_recent   = false
+    }
 
     # Container Insights (enhanced) + Fluent Bit -> CloudWatch Logs, plus a second CloudWatch agent
     # (Deployment, 1 replica) that scrapes Prometheus endpoints and publishes an allowlist as EMF.
     amazon-cloudwatch-observability = {
+      addon_version = local.addon_versions["amazon-cloudwatch-observability"]
+      most_recent   = false
       pod_identity_association = [{
         role_arn        = module.pod_identity_cloudwatch_observability.iam_role_arn
         service_account = "cloudwatch-agent"
