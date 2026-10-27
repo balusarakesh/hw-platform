@@ -48,6 +48,9 @@ service control policies cap what even the account's admin can do. Each restrict
   - *Fix:* use the GitHub App manifest flow to make it one click; there is no full automation.
 - **The GitHub App private key is a long-lived credential.** It isn't an AWS credential. It's stored in Secrets Manager and synced via ESO, and rotation is manual.
   - *Fix:* scheduled rotation plus alerting on key age.
+- **The domain changed once** (`test-hw-app.click` at Namecheap → `app-test-hw.click` at Dynadot). Only the
+  `domain` variable changed: everything else (zone, cert, ingress host, external-dns scope) follows from it via
+  Terraform outputs and SSM. The zone has `force_destroy` so a domain change can replace it.
 - **Domain registration is outside Terraform and outside AWS.** Route 53 Domains rejected the registration on this
   account (instant failure, "contact Support"), so the domain is registered at an external registrar and its NS records
   point at a Route 53 zone that the bootstrap stack creates. Delegation is a manual step at the registrar.
