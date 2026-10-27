@@ -76,11 +76,9 @@ applicationSet:
     limits: { cpu: 200m, memory: 128Mi }
 
 repoServer:
-  # Limits doubled after the helmfile sidecar was OOMKilled at 512Mi while ArgoCD rendered every app at
-  # once (13 parallel helmfile/helm runs after a big merge). Idle use is ~50Mi per container.
   resources:
     requests: { cpu: 50m, memory: 128Mi }
-    limits: { cpu: "1", memory: 1Gi }
+    limits: { cpu: 500m, memory: 512Mi }
 
   # Pod Identity association (Terraform) gives this SA read access to SSM /hw/gitops/*.
   serviceAccount:
@@ -116,6 +114,8 @@ repoServer:
           type: RuntimeDefault
       resources:
         requests: { cpu: 50m, memory: 128Mi }
+        # Doubled after this sidecar was OOMKilled at 512Mi while ArgoCD rendered every app at once
+        # (13 parallel helmfile/helm runs after a big merge). Idle use is ~45Mi.
         limits: { cpu: "1", memory: 1Gi }
       volumeMounts:
         - { name: var-files, mountPath: /var/run/argocd }
