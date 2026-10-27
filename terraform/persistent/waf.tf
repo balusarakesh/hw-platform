@@ -157,6 +157,30 @@ resource "aws_wafv2_web_acl" "app" {
       managed_rule_group_statement {
         vendor_name = "AWS"
         name        = "AWSManagedRulesCommonRuleSet"
+
+        # Not for the Atlantis webhook host: GitHub's webhook payloads exceed the rule set's 8 KB
+        # SizeRestrictions_BODY limit, which blocked every delivery (403). That host is already limited
+        # to GitHub's hook IPs (rule atlantis-github-only), HMAC-verified by Atlantis, and still covered
+        # by the Known Bad Inputs rule group.
+        scope_down_statement {
+          not_statement {
+            statement {
+              byte_match_statement {
+                search_string         = local.atlantis_host
+                positional_constraint = "EXACTLY"
+                field_to_match {
+                  single_header {
+                    name = "host"
+                  }
+                }
+                text_transformation {
+                  priority = 0
+                  type     = "LOWERCASE"
+                }
+              }
+            }
+          }
+        }
       }
     }
 
