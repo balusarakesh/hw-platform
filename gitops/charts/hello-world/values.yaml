@@ -18,6 +18,11 @@ hpa:
   targetCPUUtilizationPercentage: 70
   targetMemoryUtilizationPercentage: 80
 
+# Security groups for pods (needs ENI-trunking nodes + ENABLE_POD_ENI).
+securityGroupPolicy:
+  enabled: false
+  securityGroupIds: []
+
 # IAM comes from EKS Pod Identity associations keyed on these SA names (terraform/cluster/pod_identity.tf).
 serviceAccount:
   name: hello-world
