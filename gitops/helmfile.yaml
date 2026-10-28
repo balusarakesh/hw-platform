@@ -5,6 +5,8 @@
 # resolves at render time.
 
 repositories:
+  - name: kyverno
+    url: https://kyverno.github.io/kyverno
   - name: argo
     url: https://argoproj.github.io/argo-helm
   - name: eks
@@ -107,3 +109,16 @@ releases:
     chart: ./charts/arc-runners
     values:
       - apps/arc-runners-push/values.yaml
+
+  - name: kyverno
+    namespace: kyverno
+    chart: kyverno/kyverno
+    version: 3.9.2
+    values:
+      - apps/kyverno/values.yaml
+
+  - name: image-policies
+    namespace: kyverno
+    chart: ./charts/image-policies
+    values:
+      - apps/image-policies/values.yaml
