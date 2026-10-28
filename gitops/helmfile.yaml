@@ -129,3 +129,10 @@ releases:
     chart: ./charts/network-policies
     values:
       - apps/network-policies/values.yaml
+
+  - name: vertical-pod-autoscaler
+    namespace: vpa-system
+    chart: autoscaler/vertical-pod-autoscaler
+    version: 0.15.0
+    values:
+      - apps/vertical-pod-autoscaler/values.yaml
