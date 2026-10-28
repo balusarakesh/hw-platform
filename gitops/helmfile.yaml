@@ -101,3 +101,9 @@ releases:
     version: 6.16.2
     values:
       - apps/atlantis/values.yaml
+
+  - name: arc-runners-push
+    namespace: arc-runners-push
+    chart: ./charts/arc-runners
+    values:
+      - apps/arc-runners-push/values.yaml

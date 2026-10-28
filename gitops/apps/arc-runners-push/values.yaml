@@ -1,0 +1,77 @@
+# Runner scale set "hw-runners-push": ephemeral, in-cluster runners used ONLY by the push-to-main job
+# in .github/workflows/app.yml. Their ServiceAccount has a Pod Identity role (terraform/ci) that can
+# push to the hello-world ECR repo and sign with the cosign KMS key, nothing else. GitHub Actions
+# can't get AWS credentials directly (the account SCP blocks IAM OIDC providers), hence in-cluster.
+argocdToken:
+  enabled: false
+runnerServiceAccount:
+  create: true
+  name: hw-runners-push
+gha-runner-scale-set:
+  githubConfigUrl: https://github.com/balusarakesh/hw-platform
+  # Kubernetes Secret written by the github-app ExternalSecret (GitHub App id, installation id, key).
+  githubConfigSecret: github-app
+  runnerScaleSetName: hw-runners-push
+
+  minRunners: 0
+  maxRunners: 1
+
+  # The chart normally finds the controller with lookup(), which returns nothing under ArgoCD's
+  # `helm template`; name it explicitly (fullnameOverride in apps/arc-controller/values.yaml).
+  controllerServiceAccount:
+    namespace: arc-systems
+    name: arc-controller
+
+  listenerTemplate:
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: listener
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { cpu: 100m, memory: 128Mi }
+
+  # No containerMode: jobs run directly in the runner container (no Docker, no privileged sidecar).
+  template:
+    spec:
+      serviceAccountName: hw-runners-push
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: runner
+          image: ghcr.io/actions/actions-runner:2.338.2@sha256:759a1d94a15b05941aba5196974ff43fe15b4cbba29b694b35cbc32a1166b232
+          command: ["/home/runner/run.sh"]
+          env:
+            # GitHub App credentials (same ExternalSecret the runner registration uses) so the job can
+            # mint a short-lived installation token to open the image-bump PR.
+            - name: GITHUB_APP_ID
+              valueFrom: { secretKeyRef: { name: github-app, key: github_app_id } }
+            - name: GITHUB_APP_INSTALLATION_ID
+              valueFrom: { secretKeyRef: { name: github-app, key: github_app_installation_id } }
+            - name: GITHUB_APP_PRIVATE_KEY
+              valueFrom: { secretKeyRef: { name: github-app, key: github_app_private_key } }
+          securityContext:
+            allowPrivilegeEscalation: false
+            # The runner writes its config, _work and _diag under /home/runner.
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { cpu: "1", memory: 1Gi }
