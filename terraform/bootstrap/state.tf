@@ -1,10 +1,27 @@
 # Remote state for every other stack: S3 + SSE-KMS, versioned, private, TLS-only.
 # Locking uses S3 native lockfiles (use_lockfile = true in backend.hcl), so no DynamoDB table.
 
+data "aws_iam_policy_document" "state_key" {
+  # Explicit key policy (same as the AWS default): the account's IAM policies decide who may use it.
+  #checkov:skip=CKV_AWS_111:Key policy; "*" is scoped to this key
+  #checkov:skip=CKV_AWS_356:Key policy; "*" is scoped to this key
+  #checkov:skip=CKV_AWS_109:Key policy; account root admin is the AWS-recommended default
+  statement {
+    sid       = "AccountAdmin"
+    actions   = ["kms:*"]
+    resources = ["*"]
+    principals {
+      type        = "AWS"
+      identifiers = ["arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"]
+    }
+  }
+}
+
 resource "aws_kms_key" "state" {
   description             = "${var.project} Terraform state encryption"
   enable_key_rotation     = true
   deletion_window_in_days = 30
+  policy                  = data.aws_iam_policy_document.state_key.json
 }
 
 resource "aws_kms_alias" "state" {
@@ -13,6 +30,9 @@ resource "aws_kms_alias" "state" {
 }
 
 resource "aws_s3_bucket" "state" {
+  #checkov:skip=CKV_AWS_144:Single-region demo; versioning + KMS protect state, CRR would double storage cost
+  #checkov:skip=CKV_AWS_18:Access logging needs a second bucket; CloudTrail records state bucket API calls
+  #checkov:skip=CKV2_AWS_62:No consumer for state-change events
   # Account ID + region keeps the globally-unique name deterministic.
   bucket = "${var.project}-tfstate-${data.aws_caller_identity.current.account_id}-${var.region}"
 
