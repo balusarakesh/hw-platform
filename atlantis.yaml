@@ -29,3 +29,9 @@ projects:
     autoplan:
       enabled: true
       when_modified: ["*.tf", "../modules/**/*.tf", ".terraform.lock.hcl"]
+
+  - name: ci
+    dir: terraform/ci
+    autoplan:
+      enabled: true
+      when_modified: ["*.tf", ".terraform.lock.hcl"]
