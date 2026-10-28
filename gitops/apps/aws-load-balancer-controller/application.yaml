@@ -20,9 +20,24 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: kube-system
+  # The chart generates a new self-signed webhook CA/cert on every render. Without this, every sync
+  # rotated the webhook cert and every PR diff showed caBundle/tls.* changes.
+  ignoreDifferences:
+    - group: admissionregistration.k8s.io
+      kind: MutatingWebhookConfiguration
+      name: aws-load-balancer-webhook
+      jqPathExpressions: [".webhooks[]?.clientConfig.caBundle"]
+    - group: admissionregistration.k8s.io
+      kind: ValidatingWebhookConfiguration
+      name: aws-load-balancer-webhook
+      jqPathExpressions: [".webhooks[]?.clientConfig.caBundle"]
+    - kind: Secret
+      name: aws-load-balancer-tls
+      jsonPointers: [/data]
   syncPolicy:
     automated:
       prune: true
       selfHeal: true
     syncOptions:
       - ServerSideApply=true
+      - RespectIgnoreDifferences=true

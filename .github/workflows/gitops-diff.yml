@@ -58,6 +58,14 @@ jobs:
             exit 0
           fi
 
+          # Which Applications exist? Used to tell a genuinely new app apart from a real error
+          # (the read-only role reports both "missing" and "forbidden" as PermissionDenied).
+          existing="$(argocd app list -o name --server "$ARGOCD_SERVER" --grpc-web --insecure 2>&1)" || {
+            echo ":x: Could not list ArgoCD applications:" >> "$out"
+            printf '```\n%s\n```\n' "${existing:0:2000}" >> "$out"
+            exit 0
+          }
+
           unchanged=()
           for dir in gitops/apps/*/; do
             app="$(basename "$dir")"
@@ -84,9 +92,8 @@ jobs:
                 } >> "$out"
                 ;;
               *)
-                # The read-only role can't distinguish "missing" from "forbidden", so both mean
-                # the Application doesn't exist yet (new app: the root app creates it on merge).
-                if grep -qiE 'not found|permission denied' <<< "$diff"; then
+                # Only call it a new app if it really isn't in the cluster; anything else is an error.
+                if ! grep -qxE "(argocd/)?${app}" <<< "$existing"; then
                   echo "- **${app}**: not in the cluster yet (new app, created on merge)" >> "$out"
                 else
                   {
