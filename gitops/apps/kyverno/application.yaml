@@ -25,11 +25,11 @@ spec:
     namespace: kyverno
   # Client-side diff with one targeted ignore. Server-side diff made argocd-server load all of
   # Kyverno's (very large) CRDs per diff and OOMKilled it even at 1Gi. The only drift was the chart
-  # rendering `labels: {}` on CRDs, which the API server drops.
+  # rendering empty `labels: {}` / `annotations: {}` on CRDs, which the API server drops.
   ignoreDifferences:
     - group: apiextensions.k8s.io
       kind: CustomResourceDefinition
-      jsonPointers: [/metadata/labels]
+      jsonPointers: [/metadata/labels, /metadata/annotations]
   syncPolicy:
     automated:
       prune: true
