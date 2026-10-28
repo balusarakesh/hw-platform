@@ -30,3 +30,9 @@ hpa:
   maxReplicas: 6
   targetCPUUtilizationPercentage: 70
   targetMemoryUtilizationPercentage: 80
+
+# Per-pod resources (chart default: requests 25m/32Mi, limits 250m/128Mi). Memory request raised to
+# match observed usage (~40Mi) so the scheduler doesn't overpack nodes.
+resources:
+  requests: { cpu: 25m, memory: 48Mi }
+  limits: { cpu: 250m, memory: 128Mi }
