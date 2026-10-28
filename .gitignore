@@ -18,6 +18,8 @@ terraform.rc
 .env
 .env.*
 *.pem
+# Public Amazon RDS CA bundle, embedded in the app for TLS verify-full (not a secret).
+!app/certs/rds-global-bundle.pem
 *.key
 kubeconfig*
 

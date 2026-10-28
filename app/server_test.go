@@ -10,6 +10,9 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus/testutil"
+	"go.opentelemetry.io/otel"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
 type fakeStore struct {
@@ -87,5 +90,24 @@ func TestClientIPPrefersFirstForwardedHop(t *testing.T) {
 	r.RemoteAddr = "10.20.1.2:5555"
 	if got := clientIP(r); got != "10.20.1.2" {
 		t.Fatalf("got %s", got)
+	}
+}
+
+func TestTracingNamesSpansByRouteAndSkipsProbes(t *testing.T) {
+	rec := tracetest.NewSpanRecorder()
+	prev := otel.GetTracerProvider()
+	otel.SetTracerProvider(sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(rec)))
+	t.Cleanup(func() { otel.SetTracerProvider(prev) })
+
+	h := newTestApp(fakeStore{}).routes()
+	do(t, h, "/api/items")
+	do(t, h, "/healthz")
+
+	spans := rec.Ended()
+	if len(spans) != 1 {
+		t.Fatalf("want 1 span (probes skipped), got %d", len(spans))
+	}
+	if got := spans[0].Name(); got != "GET /api/items" {
+		t.Fatalf("span name = %q", got)
 	}
 }
