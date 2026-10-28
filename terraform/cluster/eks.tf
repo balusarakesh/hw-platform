@@ -186,22 +186,6 @@ module "eks" {
   }
 }
 
-# RDS only accepts Postgres from the EKS nodes (pods share the node SG with the VPC CNI).
-resource "aws_vpc_security_group_ingress_rule" "rds_from_nodes" {
-  security_group_id            = local.p.aurora_security_group_id
-  referenced_security_group_id = module.eks.node_security_group_id
-  ip_protocol                  = "tcp"
-  from_port                    = local.p.aurora_port
-  to_port                      = local.p.aurora_port
-  description                  = "Postgres from EKS nodes"
-}
-
-# Nodes only need to reach RDS on 5432 inside the VPC, nothing wider.
-resource "aws_vpc_security_group_egress_rule" "nodes_to_rds" {
-  security_group_id            = module.eks.node_security_group_id
-  referenced_security_group_id = local.p.aurora_security_group_id
-  ip_protocol                  = "tcp"
-  from_port                    = local.p.aurora_port
-  to_port                      = local.p.aurora_port
-  description                  = "Postgres to Aurora"
-}
+# Aurora accepts Postgres only from the hw-app-pods security group (security groups for pods,
+# see the hello-world SecurityGroupPolicy). The old node-SG rule is gone, so other pods on the
+# same nodes can no longer reach the database at the network level.
