@@ -13,7 +13,6 @@ import (
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -34,10 +33,17 @@ func setupTracing(ctx context.Context) (shutdown func(context.Context) error, er
 	if err != nil {
 		return noop, err
 	}
-	res, err := resource.Merge(resource.Default(), resource.NewWithAttributes(semconv.SchemaURL,
-		semconv.ServiceName(env("OTEL_SERVICE_NAME", "hello-world")),
-		semconv.DeploymentEnvironment(env("DEPLOYMENT_ENVIRONMENT", "demo")),
-	))
+	// resource.New builds the resource without pinning our own semconv schema URL. Merging
+	// resource.Default() (the SDK's schema) with attributes from a different semconv package version
+	// fails with "conflicting Schema URL" and crashed the app on startup.
+	res, err := resource.New(ctx,
+		resource.WithTelemetrySDK(),
+		resource.WithFromEnv(), // OTEL_RESOURCE_ATTRIBUTES / OTEL_SERVICE_NAME
+		resource.WithAttributes(
+			attribute.String("service.name", env("OTEL_SERVICE_NAME", "hello-world")),
+			attribute.String("deployment.environment", env("DEPLOYMENT_ENVIRONMENT", "demo")),
+		),
+	)
 	if err != nil {
 		return noop, err
 	}
