@@ -70,9 +70,11 @@ controller:
     limits: { cpu: "1", memory: 1536Mi }
 
 server:
+  # 1Gi limit: server-side diff (kyverno, image-policies use ServerSideDiff=true) makes argocd-server
+  # load the app's live objects, and Kyverno's CRDs are huge; it was OOMKilled at 256Mi. Idle ~40Mi.
   resources:
-    requests: { cpu: 25m, memory: 64Mi }
-    limits: { cpu: 300m, memory: 256Mi }
+    requests: { cpu: 25m, memory: 128Mi }
+    limits: { cpu: 300m, memory: 1Gi }
 
 applicationSet:
   resources:
