@@ -99,6 +99,6 @@ flowchart LR
   ena[CW agent ethtool<br/>ENA allowances] --> cwm
   app -->|OTLP traces| xray[(X-Ray<br/>trace map, latency by route)]
   alb[ALB · WAF · EKS · Aurora<br/>vended metrics] --> cwm
-  cwm --> alarms[~25 alarms<br/>incl. per-node GROUP BY] --> sns[SNS → email]
+  cwm --> alarms[24 alarms<br/>incl. per-node GROUP BY] --> sns[SNS → email]
   cwm --> dash[hw-overview dashboard]
 ```
