@@ -3,7 +3,8 @@ output "cluster_name" {
 }
 
 output "kubeconfig_command" {
-  value = "aws eks update-kubeconfig --name ${module.eks.cluster_name} --region ${var.region} --profile ${var.aws_profile}"
+  # The profile is appended only when set (Atlantis runs with an empty profile).
+  value = "aws eks update-kubeconfig --name ${module.eks.cluster_name} --region ${var.region}${var.aws_profile == "" ? "" : " --profile ${var.aws_profile}"}"
 }
 
 output "node_group_name" {

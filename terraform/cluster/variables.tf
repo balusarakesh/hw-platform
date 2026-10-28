@@ -65,3 +65,9 @@ variable "log_retention_days" {
   type        = number
   default     = 14
 }
+
+variable "admin_principal_arn" {
+  description = "IAM principal that administers the cluster and its KMS key (the operator), independent of who runs Terraform."
+  type        = string
+  default     = "arn:aws:iam::099978878209:user/admin"
+}

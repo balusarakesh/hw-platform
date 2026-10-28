@@ -130,7 +130,7 @@ resource "aws_cloudwatch_metric_alarm" "aurora_acu_high" {
 # job, but sustained blocking means either abuse or a legitimate client that needs a higher limit.
 resource "aws_cloudwatch_metric_alarm" "waf_rate_limited" {
   alarm_name        = "hw-waf-rate-limited"
-  alarm_description = "WAF returned 429 (per-IP rate limit, ${var.rate_limit_per_minute} req/60s) in 2 of the last 5 minutes. Check first: WAF log group aws-waf-logs-hw-app (which IP, which path), then decide: block the IP or raise the limit."
+  alarm_description = "WAF returned 429 (per-IP rate limit, ${var.rate_limit_per_minute} req/60s) in 2 of the last 5 minutes. Check first: WAF log group aws-waf-logs-hw-app (which IP, which path) and the WAF panel on hw-overview, then decide: block the IP or raise the limit."
 
   namespace   = "AWS/WAFV2"
   metric_name = "BlockedRequests"

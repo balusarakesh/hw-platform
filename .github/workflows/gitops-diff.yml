@@ -62,9 +62,11 @@ jobs:
           for dir in gitops/apps/*/; do
             app="$(basename "$dir")"
             # --insecure: in-cluster call to argocd-server, which uses ArgoCD's self-signed certificate.
+            # `|| rc=$?`: the step runs under `bash -e`, and `argocd app diff` exits 1 whenever an app
+            # HAS changes, so a bare `diff="$(...)"` would abort the step on the normal case.
+            rc=0
             diff="$(argocd app diff "$app" --revision "$HEAD_SHA" \
-              --server "$ARGOCD_SERVER" --grpc-web --insecure 2>&1)"
-            rc=$?
+              --server "$ARGOCD_SERVER" --grpc-web --insecure 2>&1)" || rc=$?
             case "$rc" in
               0) unchanged+=("$app") ;;
               1)

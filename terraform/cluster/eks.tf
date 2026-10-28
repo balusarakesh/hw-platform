@@ -39,8 +39,25 @@ module "eks" {
   endpoint_public_access_cidrs = local.admin_cidrs
 
   # Access entries (EKS API) instead of the aws-auth ConfigMap.
-  authentication_mode                      = "API"
-  enable_cluster_creator_admin_permissions = true
+  authentication_mode = "API"
+
+  # Admins are named explicitly, NOT "whoever runs Terraform" (enable_cluster_creator_admin_permissions):
+  # with Atlantis applying this stack, the caller is role/hw-atlantis, which would replace the laptop
+  # admin's access entry (locking the operator out) and the KMS key administrator. The entry key stays
+  # "cluster_creator" so the existing access entry isn't replaced. Atlantis has its own entry (atlantis.tf).
+  enable_cluster_creator_admin_permissions = false
+  access_entries = {
+    cluster_creator = {
+      principal_arn = var.admin_principal_arn
+      policy_associations = {
+        admin = {
+          policy_arn   = "arn:${local.partition}:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+          access_scope = { type = "cluster" }
+        }
+      }
+    }
+  }
+  kms_key_administrators = [var.admin_principal_arn]
 
   # Kubernetes Secrets are envelope-encrypted with a CMK the module creates.
   encryption_config = {
