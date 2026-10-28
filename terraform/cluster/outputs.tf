@@ -8,5 +8,5 @@ output "kubeconfig_command" {
 }
 
 output "node_group_name" {
-  value = module.eks.eks_managed_node_groups["general"].node_group_id
+  value = module.eks.eks_managed_node_groups["m7g"].node_group_id
 }

@@ -35,7 +35,7 @@ from botocore.exceptions import ClientError
 log = logging.getLogger("power")
 
 CLUSTER = "hw"
-NODEGROUP_PREFIX = "general"  # key in terraform/cluster/eks.tf; the real name gets a suffix
+NODEGROUP_PREFIX = "m7g"  # key in terraform/cluster/eks.tf; the real name gets a suffix
 AURORA_CLUSTER = "hw"
 ALARM_PREFIX = "hw-"
 APP_URL = "https://app.app-test-hw.click"
