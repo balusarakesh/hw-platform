@@ -18,6 +18,11 @@ hpa:
   targetCPUUtilizationPercentage: 70
   targetMemoryUtilizationPercentage: 80
 
+# Security groups for pods (needs ENI-trunking nodes + ENABLE_POD_ENI).
+securityGroupPolicy:
+  enabled: false
+  securityGroupIds: []
+
 # IAM comes from EKS Pod Identity associations keyed on these SA names (terraform/cluster/pod_identity.tf).
 serviceAccount:
   name: hello-world
@@ -45,3 +50,9 @@ ingress:
 resources:
   requests: { cpu: 25m, memory: 32Mi }
   limits: { cpu: 250m, memory: 128Mi }
+
+# Distributed tracing (OpenTelemetry SDK in the app). Off by default; the environment's values turn it on.
+tracing:
+  enabled: false
+  endpoint: ""
+  sampleRatio: "1.0"

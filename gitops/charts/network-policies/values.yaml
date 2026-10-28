@@ -1,0 +1,6 @@
+# Enforced by the VPC CNI network policy agent (enableNetworkPolicy=true).
+vpcCidr: 10.20.0.0/16          # ALB, kubelet probes (node IPs), EKS API ENIs, OTLP to the node agent
+serviceCidr: 172.20.0.0/16     # ClusterIP services (API server, argocd-server, cloudwatch-agent)
+kubeDnsIp: 172.20.0.10
+dbSubnetCidrs: [10.20.200.0/24, 10.20.201.0/24]
+podIdentityAgent: 169.254.170.23/32

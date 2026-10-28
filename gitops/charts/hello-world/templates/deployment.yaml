@@ -36,12 +36,20 @@ spec:
           labelSelector:
             matchLabels:
               {{- include "hello-world.selectorLabels" . | nindent 14 }}
-      terminationGracePeriodSeconds: 30
+      # preStop sleep (10s) + the app's own readiness flip and shutdown delay (SHUTDOWN_DELAY, 10s) +
+      # connection drain must fit inside this.
+      terminationGracePeriodSeconds: 45
       containers:
         - name: hello-world
           image: {{ include "hello-world.image" . }}
           imagePullPolicy: IfNotPresent
           args: [serve]
+          # Keep serving while the ALB and kube-proxy stop routing to this pod (native sleep action,
+          # no shell needed in the distroless image).
+          lifecycle:
+            preStop:
+              sleep:
+                seconds: 10
           ports:
             - name: http
               containerPort: 8080
@@ -51,6 +59,13 @@ spec:
           env:
             {{- include "hello-world.dbEnv" . | nindent 12 }}
             - { name: LISTEN_ADDR, value: ":8080" }
+            {{- if .Values.tracing.enabled }}
+            # OpenTelemetry -> CloudWatch agent (OTLP/HTTP) -> X-Ray.
+            - { name: OTEL_SERVICE_NAME, value: hello-world }
+            - { name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT, value: {{ .Values.tracing.endpoint | quote }} }
+            - { name: OTEL_TRACES_SAMPLER, value: parentbased_traceidratio }
+            - { name: OTEL_TRACES_SAMPLER_ARG, value: {{ .Values.tracing.sampleRatio | quote }} }
+            {{- end }}
             - { name: METRICS_ADDR, value: ":9090" }
           securityContext:
             {{- include "hello-world.containerSecurityContext" . | nindent 12 }}

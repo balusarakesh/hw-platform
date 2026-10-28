@@ -78,6 +78,20 @@ resource "github_repository_ruleset" "main" {
       required_approving_review_count = 0
       dismiss_stale_reviews_on_push   = true
     }
+
+    # CI must pass before a PR can merge, so Atlantis' "mergeable" apply requirement also means
+    # "checks passed". Jobs skip (= pass) when their files didn't change (see the 'changes' jobs).
+    # integration_id 15368 = GitHub Actions: only Actions can satisfy these, not a spoofed status.
+    required_status_checks {
+      strict_required_status_checks_policy = false
+      dynamic "required_check" {
+        for_each = ["test", "image", "terraform-scan"]
+        content {
+          context        = required_check.value
+          integration_id = 15368
+        }
+      }
+    }
   }
 }
 
@@ -86,4 +100,16 @@ resource "github_actions_variable" "aws_region" {
   repository    = github_repository.this.name
   variable_name = "AWS_REGION"
   value         = var.region
+}
+
+# ECR repo URL for the publish job in .github/workflows/app.yml (not secret; keeps the account ID
+# out of workflow files). Looked up, because the repo is created by the persistent stack.
+data "aws_ecr_repository" "hello_world" {
+  name = "hello-world"
+}
+
+resource "github_actions_variable" "ecr_repository_url" {
+  repository    = github_repository.this.name
+  variable_name = "ECR_REPOSITORY_URL"
+  value         = data.aws_ecr_repository.hello_world.repository_url
 }

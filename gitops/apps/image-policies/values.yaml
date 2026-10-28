@@ -1,0 +1,4 @@
+# cosign signature enforcement for hello-world (chart: gitops/charts/image-policies).
+# Both values are written by Terraform: the ECR repo (persistent) and the KMS public key (ci).
+repository: "ref+awsssm://hw/gitops/ecr_repository_url"
+publicKey: "ref+awsssm://hw/gitops/cosign_public_key"

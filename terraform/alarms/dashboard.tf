@@ -95,7 +95,7 @@ locals {
           ["ContainerInsights", "cluster_node_count", "ClusterName", local.cn],
           [".", "cluster_failed_node_count", ".", "."],
         ]
-        annotations = { horizontal = [{ label = "node group max", value = var.node_group_max_size }] }
+        annotations = { horizontal = [{ label = "node group max", value = local.node_group_max_size }] }
       }
     },
     {
@@ -120,7 +120,7 @@ locals {
       properties = {
         title       = "Node network bytes/s (worst node)", region = var.region, stat = "Maximum", period = 60
         metrics     = [["ContainerInsights", "node_network_total_bytes", "ClusterName", local.cn]]
-        annotations = { horizontal = [{ label = "baseline", value = var.node_baseline_bandwidth_gbps * 1000000000 / 8 }] }
+        annotations = { horizontal = [{ label = "baseline", value = local.node_baseline_bandwidth_gbps * 1000000000 / 8 }] }
       }
     },
     {

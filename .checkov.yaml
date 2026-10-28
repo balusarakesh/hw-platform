@@ -14,3 +14,10 @@ skip-check:
   - CKV_AWS_394
   # Distroless image has no shell for a Docker HEALTHCHECK; Kubernetes probes do this job.
   - CKV_DOCKER_2
+  # Every SSM parameter Terraform manages is a non-secret String (IDs, ARNs, the cosign *public* key)
+  # read by Helm/ArgoCD. The sensitive ones (/hw/admin_cidrs, /hw/alert_email) are SecureStrings
+  # created outside Terraform, and secrets live in Secrets Manager.
+  - CKV2_AWS_34
+  # hw-app-pods SG is attached to pods by a Kubernetes SecurityGroupPolicy (VPC CNI branch ENIs), which
+  # checkov can't see from Terraform.
+  - CKV2_AWS_5

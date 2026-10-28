@@ -1,0 +1,28 @@
+# kube-state-metrics: scraped by the CloudWatch agent (amazon-cloudwatch), reads the EKS API only.
+{{- $ns := "monitoring" }}
+{{ include "np.defaultDeny" (dict "ns" $ns) }}
+---
+{{ include "np.baseEgress" (dict "ns" $ns "root" .) }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ksm
+  namespace: {{ $ns }}
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: amazon-cloudwatch }
+        - ipBlock: { cidr: {{ .Values.vpcCidr }} }
+      ports:
+        - { protocol: TCP, port: 8080 }
+        - { protocol: TCP, port: 8081 }
+  egress:
+    - to:
+        - ipBlock: { cidr: {{ .Values.vpcCidr }} }
+        - ipBlock: { cidr: {{ .Values.serviceCidr }} }
+      ports:
+        - { protocol: TCP, port: 443 }

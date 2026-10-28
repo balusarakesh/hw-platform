@@ -12,6 +12,8 @@ variable "domain" {
 }
 
 resource "aws_route53_zone" "main" {
+  #checkov:skip=CKV2_AWS_38:DNSSEC needs a DS record at the external registrar (Dynadot); see docs/GAPS.md
+  #checkov:skip=CKV2_AWS_39:Query logging not needed for a demo zone (cost); ALB/WAF logs cover app traffic
   name    = var.domain
   comment = "${var.project}: delegated from the external registrar"
 
