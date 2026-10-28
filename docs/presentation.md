@@ -22,7 +22,7 @@ paginate: true
 | Demo app reachable from internet | Go app behind ALB + ACM + WAF, HPA 2–6 |
 | RDS used by the app | Aurora PostgreSQL Serverless v2 via 15-min IAM tokens over TLS |
 | Secure by default | Pod Identity, private everything, KMS everywhere, PSA restricted, signed images |
-| Going further | Observability (logs, metrics, traces, ~25 alarms), GitOps (Atlantis + ArgoCD PR comments), WAF |
+| Going further | Observability (logs, metrics, X-Ray traces, 24 alarms), GitOps (Atlantis + ArgoCD PR comments, signed-image CI), defense in depth (WAF, pod SGs, NetworkPolicies, Kyverno), VPA |
 
 ---
 
@@ -78,6 +78,16 @@ See `docs/architecture.md` (runtime, identity, delivery, observability diagrams)
 1. PR touching `terraform/` → **Atlantis plan comment** → `atlantis apply` → merge
 2. PR touching `gitops/` → **ArgoCD diff comment** from an in-cluster runner → merge → ArgoCD sync
 3. PR touching `app/` → tests + trivy → merge → arm64 image → ECR → cosign sign → **auto bump PR**
+
+---
+
+## Incidents I hit and fixed (SRE judgement)
+
+- Pod SGs broke DNS to CoreDNS → bootstrap job + new DB connections failed → return SG rules
+- Turning tracing on crash-looped new pods (OTel schema conflict) → fix + regression test; old pods kept serving
+- Kyverno server-side diff OOMKilled argocd-server → client-side diff + targeted ignores; VPA added
+- NAT change cut Atlantis' own egress mid-apply → state repair; don't let Atlantis apply its own network path
+- WAF body-size rule blocked GitHub webhooks → scoped rule set; Atlantis plan would have dropped operator EKS access → explicit admins
 
 ---
 

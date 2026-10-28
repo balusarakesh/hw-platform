@@ -3,7 +3,7 @@
 One line per feature, grouped by what the assignment asks about. Each line: **what** → *why*.
 
 ## Infrastructure as Code
-- **4 Terraform stacks** (`bootstrap`, `persistent`, `cluster`, `alarms`, + `ci`) → split by change rate and blast radius.
+- **5 Terraform stacks** (`bootstrap`, `persistent`, `cluster`, `alarms`, `ci`) → split by change rate and blast radius; 4 are Atlantis projects (serial plans).
 - **Remote state**: S3 + SSE-KMS + versioning + public-access block + native S3 lockfile → no DynamoDB.
 - **Reusable modules** (`network`, `aurora-serverless`, `ecr-repository`) wrapping pinned `terraform-aws-modules`.
 - **Exact pins**: Terraform ≥ 1.17, providers `= x.y.z`, `.terraform.lock.hcl` for darwin + linux (amd64/arm64).
@@ -18,7 +18,8 @@ One line per feature, grouped by what the assignment asks about. Each line: **wh
 - **ArgoCD + helmfile** via a Config Management Plugin sidecar; one Application per app (`gitops/apps/<app>/`).
 - **App-of-apps root** installed once by Terraform; ArgoCD then manages itself → bootstrap chicken-and-egg solved.
 - **PR diff comments**: in-cluster runners run `argocd app diff` with a read-only account → ArgoCD stays private.
-- **App pipeline**: PR → vet/test/lint/build/trivy; merge → arm64 build → ECR push → cosign sign → auto bump PR.
+- **App pipeline**: PR → vet/test/lint/build/trivy (required checks); merge → arm64 build (GitHub runner) → in-cluster push runner → ECR → cosign sign (KMS) → bot opens image-bump PR with ArgoCD diff.
+- **Two runner pools**: `hw-runners` (PR diffs, no AWS, no K8s token) and `hw-runners-push` (main only, ECR push + kms:Sign).
 - **Images pinned by `tag@sha256`** everywhere (app, ArgoCD, controllers, sidecars).
 
 ## Security (baseline is pass/fail)
@@ -32,7 +33,7 @@ One line per feature, grouped by what the assignment asks about. Each line: **wh
 - **Encryption in transit**: ALB TLS 1.3 policy, HSTS, HTTP→HTTPS redirect; app→Aurora `verify-full`, `rds.force_ssl=1`.
 - **Secrets**: RDS-managed master password; app uses 15-min IAM tokens; ESO syncs GitHub/ArgoCD tokens from Secrets Manager.
 - **Workloads**: non-root, read-only rootfs, no privilege escalation, caps dropped, seccomp, limits; PSA `restricted` enforced.
-- **Supply chain**: ECR scan-on-push, immutable tags, trivy in CI, cosign signatures verified at admission (KMS key).
+- **Supply chain**: ECR scan-on-push, immutable tags, trivy in CI, **cosign signatures (KMS key) enforced by Kyverno** in `hello-world` — unsigned image rejected, signed admitted (tested).
 - **Edge**: AWS WAF — 10 RPS/IP → 429, AWS Common + Known Bad Inputs rules, Atlantis host GitHub-IPs-only.
 - **IMDSv2 required, hop limit 1** → pods can't steal the node role.
 
@@ -47,12 +48,14 @@ One line per feature, grouped by what the assignment asks about. Each line: **wh
 - **Health checks**: `/healthz` (liveness, no deps), `/readyz` (readiness, flips on shutdown), ALB health checks.
 
 ## Reliability & scaling
-- **HPA** 2–6 replicas (CPU 70 %, memory 80 %) + **Cluster Autoscaler** on the managed node group.
+- **HPA** 2–6 replicas (CPU 70 %, memory 80 %) + **Cluster Autoscaler** on the managed node group (max 4).
+- **VPA** (in-place pod resize, EKS 1.36) for ArgoCD components: resizes running pods without restarts; Git/Deployment unchanged → no ArgoCD drift; falls back to eviction only if in-place isn't possible.
 - **2 AZs**, NAT per AZ, topology spread, PDB, rolling updates with `maxUnavailable: 0`.
-- **Zero-downtime pod removal**: ALB pod readiness gates + preStop sleep + deregistration delay.
+- **Zero-downtime pod removal**: ALB pod readiness gates + preStop sleep + 30 s deregistration delay → 0 errors deleting pods at ~9 RPS (measured).
 - **Graceful shutdown**: readiness off → wait → drain connections.
 - **Node auto repair** (EKS node monitoring agent).
-- **Aurora Serverless v2** 0.5–2 ACU (always on), backups 7 days, deletion protection, Performance Insights.
+- **Aurora Serverless v2** 0.5–2 ACU (always on, no cold start), backups 7 days, deletion protection, Performance Insights.
+- **m7g.medium nodes** (ENI trunking needed for pod SGs; t4g can't), migrated blue/green.
 
 ## Cost
 - **$100/month budget** with alerts at 50/75/90 % + forecast.
@@ -68,7 +71,13 @@ One line per feature, grouped by what the assignment asks about. Each line: **wh
 ## Things that broke and how I found/fixed them (shows SRE judgement)
 - ENA metrics silently dropped (Prometheus "untyped") → CloudWatch agent ethtool plugin.
 - GitHub webhooks 403 by WAF body-size rule → scoped the rule set away from the Atlantis host.
-- Atlantis plan would have replaced the operator's EKS access → explicit admins.
+- Atlantis plan would have replaced the operator's EKS admin access ("creator = whoever runs Terraform") → explicit admins.
 - Power-down took 44 min (PDBs + serial Aurora stop) → drain bypassing PDBs + parallel stop.
 - ArgoCD helmfile sidecar OOMKilled during a mass render → limits doubled.
-- LB controller webhook CA regenerated on every render → `ignoreDifferences` + `RespectIgnoreDifferences`.
+- NAT-per-AZ change cut Atlantis' own egress mid-apply → state repaired (untaint/import); lesson: don't let Atlantis apply its own network path.
+- Pod security groups: DNS to CoreDNS blocked (node SG accepted DNS only from itself) → bootstrap job failed, new DB connections hung → return rules added.
+- Tracing turned on → pods crash-looped (OpenTelemetry "conflicting Schema URL") → fixed + regression test reproducing the exact error; old pods kept serving (maxUnavailable 0).
+- Kyverno ServerSideDiff OOMKilled argocd-server (even at 1Gi) → client-side diff + targeted ignoreDifferences.
+- Atlantis lock contention: a gitops PR touching ArgoCD values locked the `cluster` project → apply/merge order.
+- LB controller webhook CA regenerated on every render (Helm genCA) → `ignoreDifferences` + `RespectIgnoreDifferences`.
+- PR diff comment reported every app as "new" when the real error was permission denied → errors now shown as errors.

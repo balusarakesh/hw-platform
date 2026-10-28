@@ -21,12 +21,13 @@ curl -s https://app.app-test-hw.click/readyz
 - `kubectl get ns --show-labels` → PSA restricted; `kubectl get networkpolicy -A`; `kubectl get securitygrouppolicy -A`.
 - IAM: Pod Identity associations `aws eks list-pod-identity-associations --cluster-name hw`.
 - WAF: `hey -z 70s -q 20 -c 1 https://app.app-test-hw.click/` → 429s; Log4Shell header → 403.
-- Signed images: try to run an unsigned image in `hello-world` → admission denied.
+- Signed images: `kubectl -n hello-world run t --dry-run=server --image=<unsigned ECR digest> …` → Kyverno denies "no signatures found"; the running signed image is admitted.
+- VPA: `kubectl -n argocd get vpa`; compare `kubectl get sts argocd-application-controller` requests vs the pod's (resized in place, ArgoCD still Synced).
 - Exposure / blast radius table (presentation slide 5).
 
 ## 4. Observability (5 min)
 - CloudWatch dashboard `hw-overview`; alarm list (all OK); alarm history shows each was triggered once.
-- X-Ray / Application Signals: trace map, a request trace with the DB span.
+- X-Ray: trace map and a request trace with its DB span; grab a `trace_id` from an access-log line and look it up.
 - Logs Insights: `fields @timestamp, log | filter log like /"msg":"request"/ | sort @timestamp desc`.
 
 ## 5. GitOps live change (5 min) — "make a live change"

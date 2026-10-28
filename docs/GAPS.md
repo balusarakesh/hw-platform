@@ -34,6 +34,9 @@ Each item: what it is → *fix / next step*. Grouped by topic; account constrain
 - **WAF**: rate limit is per IP and approximate (a few seconds of overshoot; clients behind one NAT share a budget); managed rules in block mode without a count-mode trial; Common rule set skipped for the Atlantis host (GitHub payloads exceed its 8 KB body rule — host is IP-allowlisted + HMAC). *Fix:* per-path/header keys, count-mode rollout.
 - **AWS-managed addons run privileged/as root** (VPC CNI, kube-proxy, Pod Identity agent, node monitoring agent, CloudWatch agent, Fluent Bit) — **expected**, they program host networking or read host data. Accepted exception.
 - **node-exporter** uses host namespaces (non-root, no caps); its namespace is the only PSA `privileged` one.
+- **HTTPS egress is open to `0.0.0.0/0`** for controllers/app (AWS APIs, GitHub, ECR), and ArgoCD's egress isn't restricted. *Fix:* VPC endpoints (STS, Secrets Manager, ECR, X-Ray, logs) + an FQDN-aware egress proxy.
+- **The image running when signature enforcement was turned on was signed once by hand** (bootstrap); every later image is signed by CI.
+- **NetworkPolicies don't apply to host-network pods** (node-exporter, CloudWatch agent); they're governed by the node SG.
 - **No GuardDuty / Security Hub / CloudTrail Lake** (account-level). *Fix:* enable in the org.
 
 ## Reliability
@@ -41,11 +44,13 @@ Each item: what it is → *fix / next step*. Grouped by topic; account constrain
 - **Restores never tested.** *Fix:* periodic restore drill.
 - **No SLOs / error budgets**; alarms are thresholds. *Fix:* availability + latency SLOs with burn-rate alerts.
 - **No multi-environment** (dev/stage/prod). *Fix:* per-env stacks + ArgoCD ApplicationSets.
-- **Small fleet**: m7g.medium (1 vCPU) nodes, CA up to 4; a node loss squeezes addons until a replacement joins.
+- **Small fleet**: m7g.medium (1 vCPU) nodes, CA up to 4; the platform requests ~2.2 vCPU, so steady state is 3 nodes. *Fix:* fewer, larger nodes or trim per-pod requests.
+- **VPA recommendations follow recent load**: after busy periods it recommends high CPU for ArgoCD, which on 1-vCPU nodes can defer in-place resizes or add nodes. *Fix:* VPA manages memory only (`controlledResources: [memory]`, `RequestsOnly`).
+- **Atlantis applying changes to its own network path** (e.g. NAT/route changes) can lose its state upload mid-apply. *Fix:* apply such changes from outside the cluster, or add S3/STS VPC endpoints.
 
 ## Cost / power-off
-- **`down` stops nodes + Aurora only**; control plane, 2 NATs, ALB, WAF keep billing (~$5/day). *Fix:* destroy the cluster stack when idle.
-- **Aurora 0.5 ACU minimum** (always available, no cold start) costs ~$1.45/day vs ~$0 at 0 ACU.
+- **`down` stops nodes + Aurora only**; control plane, 2 NATs, ALB, WAF keep billing (~$6/day). *Fix:* destroy the cluster stack when idle.
+- **Aurora 0.5 ACU minimum** (always available, no cold start) costs ~$1.45/day vs ~$0 at 0 ACU; **NAT per AZ** adds ~$1.20/day.
 - **AWS restarts a stopped Aurora after 7 days**; `power.py status` warns, nothing re-stops it. *Fix:* EventBridge rule.
 - `power.py` scales the node group outside Terraform (module ignores desired-size drift; saved size in SSM).
 - `power.py` cost estimate is a static price table (no data transfer/LCU/storage).

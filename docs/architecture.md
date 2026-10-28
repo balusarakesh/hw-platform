@@ -18,8 +18,8 @@ flowchart LR
       app[hello-world pods<br/>HPA 2–6 · SG for pods<br/>non-root, read-only fs]
       atl[Atlantis]
       argo[ArgoCD + helmfile CMP]
-      ctrl[LB controller · external-dns<br/>cluster-autoscaler · ESO]
-      runners[ARC runners<br/>diff / push]
+      ctrl[LB controller · external-dns<br/>cluster-autoscaler · ESO<br/>Kyverno · VPA]
+      runners[ARC runners<br/>hw-runners: PR diffs<br/>hw-runners-push: main only]
       obs[CloudWatch agent · Fluent Bit<br/>node-exporter · kube-state-metrics]
     end
     subgraph db[Isolated DB subnets · no internet route]
@@ -48,6 +48,7 @@ flowchart LR
     a8[atlantis]:::sa
     a9[hw-runners-push]:::sa
     a10[cloudwatch-agent]:::sa
+    a11[kyverno]:::sa
   end
   a1 --> p1[rds-db:connect as hw_app only]
   a2 --> p2[read RDS master secret]
@@ -59,6 +60,7 @@ flowchart LR
   a8 --> p8[AdministratorAccess + EKS admin<br/>biggest blast radius — see GAPS]
   a9 --> p9[ECR push hello-world + kms:Sign cosign key]
   a10 --> p10[CloudWatch metrics/logs + X-Ray]
+  a11 --> p11[ECR read hello-world<br/>verify cosign signatures]
   classDef sa fill:#eef,stroke:#88a
 ```
 
@@ -81,7 +83,7 @@ flowchart TB
   push -->|opens| bump[image-bump PR<br/>tag + digest]
   bump --> diff
   bump -->|merge| argocd
-  cluster -->|admission| verify[cosign signature verified]
+  cluster -->|admission| verify[Kyverno: cosign signature<br/>verified with KMS public key]
 ```
 
 ## Observability

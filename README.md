@@ -1,182 +1,126 @@
 # hw-platform
 
-Incode SRE take-home: a Go **hello-world** app on **EKS**, reading from **Aurora PostgreSQL Serverless v2** with
-IAM database auth, deployed by **ArgoCD + helmfile**, all provisioned with **Terraform** and secure by default.
+Incode SRE take-home: a Go **hello-world** app on **EKS**, reading from **Aurora PostgreSQL Serverless v2** with IAM
+database auth, delivered end to end through **GitOps** (Atlantis for Terraform, ArgoCD + helmfile for Kubernetes),
+secure by default and observable (logs, metrics, traces, alarms).
 
-> Status: **live** at https://app.app-test-hw.click — Phase 1 (baseline) deployed; Phase 2 (observability)
-> deployed except the `terraform/alarms` stack. CI/CD, PR diffs, Atlantis and extras follow. Known gaps and trade-offs: [docs/GAPS.md](docs/GAPS.md).
+> **Live:** https://app.app-test-hw.click · **Docs:** [architecture](docs/architecture.md) ·
+> [interview cheat sheet](docs/interview-cheatsheet.md) · [slides](docs/presentation.md) ·
+> [demo walkthrough](docs/walkthrough.md) · [gaps & trade-offs](docs/GAPS.md)
 >
-> The AWS account's guardrails (SCPs) shape several choices: region `us-east-2`, **EKS Pod Identity** instead of
-> IRSA, **Cluster Autoscaler** instead of Karpenter, and no GitHub Actions OIDC. See
-> [docs/GAPS.md#account-guardrails-scps-on-the-aws-account](docs/GAPS.md#account-guardrails-scps-on-the-aws-account).
+> The AWS account's guardrails (SCPs) shaped several choices: region `us-east-2`, **EKS Pod Identity** instead of
+> IRSA, **Cluster Autoscaler** instead of Karpenter, no GitHub Actions OIDC. See [GAPS](docs/GAPS.md).
 
-## Architecture
+## Architecture (summary)
 
 ```
-                 Internet
-                    │ 443 (80 → 301 to 443)
-          ┌─────────▼──────────┐   public subnets (ALB + NAT only)
-          │ ALB (ACM TLS 1.3)  │◄── app.app-test-hw.click (Route 53, external-dns)
-          │ + AWS WAF          │    10 RPS/IP → 429, AWS managed rules → 403
-          └─────────┬──────────┘
-                    │ pod IPs (target-type ip)
- ┌──────────────────▼─────────────────────────────┐ private subnets
- │ EKS (private + IP-restricted public endpoint)  │
- │  managed node group: 2–3 × t4g.medium (arm64)  │
- │  ├─ hello-world (2 replicas, Pod Identity → rds-db:connect as hw_app only)
- │  ├─ db-bootstrap Job (Pod Identity → read RDS master secret)
- │  ├─ ArgoCD (+ helmfile plugin sidecar, Pod Identity → read SSM /hw/gitops/*)
- │  ├─ aws-load-balancer-controller, external-dns, cluster-autoscaler (Pod Identity, scoped)
- └──────────────────┬─────────────────────────────┘
-                    │ 5432, TLS (rds.force_ssl), IAM token auth
- ┌──────────────────▼─────────────────┐ isolated database subnets (no internet route)
- │ Aurora PostgreSQL 18 Serverless v2 │ 0–2 ACU (auto-pause), KMS-encrypted
- └────────────────────────────────────┘
+Internet ─▶ AWS WAF (10 RPS/IP → 429, managed rules) ─▶ ALB (ACM, TLS 1.3) ─▶ hello-world pods (target-type ip)
+                                                     └▶ atlantis.<domain>/events (GitHub hook IPs only)
+VPC 10.20.0.0/16, 2 AZs: public (ALB, NAT×2) · private (EKS 1.36, m7g.medium) · isolated DB subnets (no internet)
+hello-world ─▶ Aurora PostgreSQL 18 (0.5–2 ACU) over TLS verify-full with 15-min IAM tokens, from its own pod SG
 ```
+Diagrams for runtime, identity, delivery and observability: [docs/architecture.md](docs/architecture.md).
 
 ## Repository layout
 
 | Path | What |
 |---|---|
-| `app/` | Go app (`serve` + `migrate` subcommands), SQL schema/seed, Dockerfile |
-| `terraform/bootstrap/` | State bucket (KMS, versioned, S3 lockfile), GitHub repo + settings, AWS Budget ($100, the account's spend limit). Applied from a laptop only |
-| `terraform/persistent/` | VPC, NAT, Aurora, ECR, KMS, ACM cert, SNS alerts topic. Changes rarely |
-| `terraform/cluster/` | EKS, node group, addons, Pod Identity roles + associations, SSM hand-off params, ArgoCD bootstrap |
-| `terraform/modules/` | Reusable wrappers: `network`, `aurora-serverless`, `ecr-repository` |
-| `gitops/` | `helmfile.yaml`, the app chart, and `apps/<name>/` per app: `application.yaml` (ArgoCD Application) + `values.yaml` (Helm values) |
-| `scripts/` | `push-image.sh` (first image / manual fallback) |
-| `docs/GAPS.md` | Known gaps, trade-offs and what I'd do next |
+| `app/` | Go app (`serve` + `migrate`), OpenTelemetry tracing, Prometheus metrics, SQL schema/seed, Dockerfile |
+| `terraform/bootstrap/` | State bucket, Route 53 zone, GitHub repo + rulesets, AWS Budget — **laptop-only** |
+| `terraform/persistent/` | VPC (NAT per AZ), Aurora, ECR, KMS, ACM, SNS, WAF |
+| `terraform/cluster/` | EKS, node group, addons, Pod Identity roles, pod security group, ArgoCD bootstrap, SSM hand-off |
+| `terraform/alarms/` | CloudWatch alarms (incl. per-node multi-time-series) + `hw-overview` dashboard |
+| `terraform/ci/` | cosign KMS signing key, push-runner and Kyverno ECR roles |
+| `terraform/modules/` | `network`, `aurora-serverless`, `ecr-repository` |
+| `gitops/apps/<app>/` | One ArgoCD `application.yaml` + Helm `values.yaml` per app (16 apps) |
+| `gitops/charts/` | `hello-world`, `network-policies`, `image-policies`, `arc-runners` |
+| `.github/workflows/` | `app.yml` (test → build → scan → push → sign → bump PR), `gitops-diff.yml`, `terraform-scan.yml` |
+| `scripts/` | `power.py` (on/off), `push-image.sh`, `argocd-pr-diff-token.sh` |
+| `atlantis.yaml` | Atlantis projects: `persistent`, `cluster`, `alarms`, `ci` (serial plans) |
 
-## How the pieces fit
+## How changes flow (all via PRs)
 
-- **Terraform → GitOps hand-off.** Helm values need ARNs/IDs only Terraform knows. The cluster stack writes them to
-  SSM (`/hw/gitops/*`); helmfile resolves `ref+awsssm://...` references in the values files at render time. No
-  account IDs or ARNs are committed.
-- **ArgoCD chicken-and-egg.** Terraform installs ArgoCD and a root `Application` once (`ignore_changes = all`).
-  The root app applies every `gitops/apps/*/application.yaml`; `apps/argocd/` makes ArgoCD manage its own chart
-  from then on.
-- **helmfile in ArgoCD.** ArgoCD has no native helmfile support, so a Config Management Plugin sidecar runs
-  `helmfile --selector name=$RELEASE template`. Each `Application` renders exactly one release. Values that only
-  Terraform knows are written as `ref+awsssm://hw/gitops/...` strings in plain `values.yaml` files; helmfile
-  resolves them (vals) at render time.
-- **Autoscaling.** The app has an HPA (2–6 replicas, CPU 70% / memory 80%, metrics-server addon). Cluster
-  Autoscaler adds nodes (up to 3) when pods don't fit.
-- **Edge protection.** AWS WAF on the ALB (`terraform/persistent/waf.tf`, attached by the LB controller via the
-  `wafv2-acl-arn` Ingress annotation): a per-IP rate limit of 600 requests/60s (10 RPS) answers **429** with
-  `Retry-After: 60`; AWS managed Common + Known Bad Inputs rule groups answer **403** (verified: Log4Shell
-  header and path traversal blocked). Blocked requests are logged to `aws-waf-logs-hw-app`; the
-  `hw-waf-rate-limited` alarm fires when the limit is being hit.
-- **Terraform via PRs (Atlantis).** Atlantis runs in-cluster (`gitops/apps/atlantis`, GitHub App `hw-platform-bot`)
-  and plans `terraform/{persistent,cluster,alarms}` on every PR that touches them (`atlantis.yaml`), posting the
-  plan as a PR comment; `atlantis apply` only once the PR is mergeable (enforced in the server-side repo config).
-  Its webhook endpoint `https://atlantis.app-test-hw.click/events` shares the ALB, and a WAF rule only admits
-  GitHub's hook IP ranges (from api.github.com/meta). Backend settings come from SSM via `TF_CLI_ARGS_init`;
-  credentials from the `hw-atlantis` Pod Identity role. `terraform/bootstrap` stays laptop-only.
-- **GitOps PR diffs.** PRs touching `gitops/**` get one comment with `argocd app diff` per app, made by in-cluster
-  GitHub Actions runners (ARC scale set `hw-runners`) using a read-only ArgoCD account (`pr-diff`, applications
-  `get` only). ArgoCD's API stays private. Runner pods are non-root, have no AWS role and no Kubernetes token, and
-  only run PRs from this repo.
-- **Secrets in the cluster.** External Secrets Operator (Pod Identity role limited to `hw/github/*` and
-  `hw/argocd/*`) syncs the GitHub App key, webhook secret and ArgoCD diff token from Secrets Manager.
-- **Observability.** The `amazon-cloudwatch-observability` EKS addon runs Container Insights (enhanced) and
-  Fluent Bit (all pod logs → KMS-encrypted CloudWatch log groups with 14-day retention). A second CloudWatch agent
-  (`cloudwatch-agent-prometheus`, one replica) scrapes pods labelled `hw.io/scrape=true`: the app's `/metrics`
-  (port 9090, never exposed outside the cluster), node-exporter (conntrack + ENA allowance counters) and
-  kube-state-metrics (HPA state). Only an allowlist is published to the `hw/Prometheus` namespace. Alarms
-  (→ SNS email) and the `hw-overview` dashboard live in `terraform/alarms`.
-- **IAM for pods.** EKS Pod Identity: each role trusts `pods.eks.amazonaws.com` and is bound to exactly one
-  `namespace/serviceaccount` by an association in Terraform, so charts carry no role ARNs.
-- **DB access without passwords.** The app's Pod Identity role allows `rds-db:connect` for one DB user. The app mints a
-  15-minute IAM token per new connection (pgx `BeforeConnect`) and verifies the server cert against the embedded
-  RDS CA (`verify-full`). A PreSync Job with a *separate* role reads the RDS-managed master secret to create that
-  user (`GRANT rds_iam`), schema and seed rows; it is idempotent and reruns on each sync.
+| Change in | PR gets | On merge |
+|---|---|---|
+| `terraform/**` | Atlantis plan comment; `atlantis apply` once mergeable (required checks pass) | merged after apply |
+| `gitops/**` | `argocd app diff` comment from an in-cluster runner (ArgoCD stays private) | ArgoCD syncs |
+| `app/**` | `go vet`/test/lint, arm64 image build, trivy scan (required checks) | CI builds → ECR → cosign sign (KMS) → opens an image-bump PR |
 
-## Deploy from scratch
-
-Prerequisites: Terraform ≥ 1.17, AWS CLI (profile `default`), `gh`, Docker via Colima, `crane`.
-
-1. **Manual, once:** register the domain at any registrar (Route 53 Domains registration is unavailable on this
-   account), then set the two sensitive parameters (never in git):
-   ```bash
-   aws ssm put-parameter --name /hw/alert_email --type SecureString --value '<email>'
-   aws ssm put-parameter --name /hw/admin_cidrs --type SecureString --value "$(curl -s https://checkip.amazonaws.com)/32"
-   ```
-2. **Bootstrap:** `export GITHUB_TOKEN=$(gh auth token) && make bootstrap`, then set the domain's name servers at
-   the registrar to `terraform -chdir=terraform/bootstrap output name_servers` and wait for
-   `dig NS app-test-hw.click +short` to return them.
-3. **Persistent:** `make plan STACK=persistent && make apply STACK=persistent`
-4. **First image:** `colima start --arch aarch64 && make image` (commit the updated image tag/digest in `gitops/apps/hello-world/values.yaml`), push to `main`
-5. **Cluster:** `make plan STACK=cluster && make apply STACK=cluster`, then `make kubeconfig`
-6. ArgoCD syncs everything; `https://app.app-test-hw.click` serves once the ALB and DNS are up.
-7. **Alarms + dashboard:** `make plan STACK=alarms && make apply STACK=alarms` (after the ALB exists; it's looked up
-   by its IngressGroup tag). Confirm the SNS subscription email.
-
-## Power off / on (cost saver)
-
-Only the managed node group (scaled to 0) and Aurora (stopped) are touched. The EKS control plane, NAT, ALB, DNS,
-ECR, secrets and state keep running, so bring-up takes minutes.
-
-```bash
-/opt/homebrew/bin/python3 -m venv scripts/.venv && scripts/.venv/bin/pip install -r scripts/requirements.txt
-scripts/.venv/bin/python scripts/power.py status      # read-only: sizes, Aurora state, root/CA auto-sync, alarm actions, $/hour
-scripts/.venv/bin/python scripts/power.py down        # dry run
-scripts/.venv/bin/python scripts/power.py down --yes  # alarms off → pause ArgoCD auto-sync (root, then cluster-autoscaler) → CA to 0 → nodes to 0 → stop Aurora
-scripts/.venv/bin/python scripts/power.py up --yes    # start Aurora + restore nodes in parallel → CA to 1 → resume auto-sync → wait for /readyz and /api/items → alarms on
-```
-
-`--profile` (default `default`) and `--region` (default `us-east-2`) are supported; every command is idempotent.
-
-ArgoCD UI: `kubectl -n argocd port-forward svc/argocd-server 8443:443` (never exposed publicly).
+`main` is PR-only (no force-push/delete), with required checks. `bootstrap` is applied from the laptop by design.
 
 ## Security baseline
 
 | Requirement | How |
 |---|---|
-| Least-privilege IAM, no static creds | One Pod Identity role per service account, bound to one `namespace/serviceaccount`. No IAM users or access keys are created; GitHub Actions gets no AWS access at all (OIDC is blocked by the account SCP; see GAPS). |
-| Private network | Nodes/pods in private subnets, Aurora in isolated subnets (no internet route), only ALB + NAT public. RDS SG allows 5432 from the node SG only. EKS public endpoint limited to my IP. IMDSv2 hop limit 1. |
-| Encryption at rest | Aurora storage, master secret, ECR, CloudWatch log groups, SNS: CMK `alias/hw-data`. Kubernetes Secrets: EKS envelope encryption (module-created CMK). Node EBS: encrypted gp3. State: SSE-KMS. |
-| Encryption in transit | ALB TLS 1.3/1.2 policy with ACM cert, HTTP → HTTPS redirect, HSTS. App → Aurora TLS `verify-full`, `rds.force_ssl=1`. State bucket denies non-TLS. |
-| Secrets | Master password generated + stored by RDS in Secrets Manager; app uses IAM tokens (no password). Alert email / home IP only in SSM SecureString. |
-| Workloads | Non-root (uid 65532), read-only rootfs, no privilege escalation, all capabilities dropped, seccomp RuntimeDefault, CPU/memory limits, PSA `restricted` on app namespaces, images pinned by `tag@sha256` (app, ArgoCD, redis, LB controller, external-dns, helmfile sidecar). |
-| Remote state | S3 + KMS + versioning + public access block + native S3 locking (`use_lockfile`). |
+| Least privilege, no static creds | One **Pod Identity** role per service account (app: `rds-db:connect` as one DB user only). No IAM users/keys in cluster or CI. |
+| Private network | Nodes/pods private, Aurora in isolated subnets; only ALB + NAT public. **Security groups for pods**: only `hw-app-pods` may reach Aurora. **NetworkPolicies** default-deny in every namespace we own (42 policies). EKS API: private + IP-restricted public. IMDSv2, hop limit 1. |
+| Encryption at rest | KMS: Aurora, master secret, ECR, CloudWatch Logs, SNS, Kubernetes Secrets (envelope), Terraform state; EBS encrypted. |
+| Encryption in transit | ALB TLS 1.3 policy, HSTS, HTTP→HTTPS redirect; app→Aurora `verify-full`, `rds.force_ssl=1`. |
+| Secrets | RDS-managed master password; app uses IAM tokens; ESO syncs GitHub App/ArgoCD tokens from Secrets Manager. Nothing in Git (scanned). |
+| Workloads | Non-root, read-only rootfs, no privilege escalation, caps dropped, seccomp, limits; **PSA `restricted` enforced** on every namespace we own except `node-exporter`. Images pinned by digest; **cosign-signed and verified at admission** (Kyverno). |
+| Edge | **AWS WAF**: 10 RPS per IP → 429, AWS Common + Known Bad Inputs → 403, Atlantis host GitHub-IPs only. |
 
-### Security exceptions (documented)
+**Documented exceptions:** EKS public endpoint (operator IP only); AWS-managed addons run privileged (CNI, kube-proxy,
+Pod Identity agent, node monitoring, CloudWatch agent, Fluent Bit — expected); node-exporter uses host namespaces
+(non-root, no caps); Atlantis has AdministratorAccess (hardening plan in GAPS); operator laptop uses the account's
+`admin` key.
 
-- **EKS public endpoint** is enabled, restricted to my IP (`/hw/admin_cidrs`). Private-only would need a VPN/bastion.
-- **Public GitHub repo** (required by the assignment): Checkov `CKV_GIT_1` skipped.
-- **Module pinning by version, not commit hash** (`CKV_TF_1` skipped): registry modules are exact-version pinned and
-  provider checksums are locked in `.terraform.lock.hcl` for darwin/linux.
-- **`kube-system` has no PSA label**: AWS-managed addons live there.
-- **node-exporter** uses `hostNetwork`/`hostPID` to read node conntrack and NIC (ENA) counters. Its namespace
-  (`node-exporter`) is PSA `privileged` (warn: restricted); the pod runs as uid 65534, no capabilities,
-  read-only rootfs, no host root filesystem mount.
-- **Atlantis has AdministratorAccess** (Pod Identity role `hw-atlantis`) plus EKS cluster-admin, because it applies
-  stacks that manage IAM/KMS/EKS/RDS. Limited to this repo, same-repo PRs, mergeable-only applies, webhook secret
-  and a GitHub-only WAF rule; see GAPS for hardening.
-- **AWS-managed EKS addons run as root / privileged** (they manage node networking, credentials and logs).
-  Output of a scan of the live cluster (`kubectl get pods -A -o json`, containers that are privileged or don't
-  prevent root):
+## Observability
 
-  | Namespace | Addon (container) | Why |
-  |---|---|---|
-  | kube-system | vpc-cni (`aws-node`, `aws-vpc-cni-init`, `aws-eks-nodeagent`) | programs node networking / eBPF NetworkPolicy |
-  | kube-system | kube-proxy | iptables rules on the host |
-  | kube-system | eks-pod-identity-agent (+ init) | link-local credential endpoint on the node |
-  | kube-system | eks-node-monitoring-agent | reads kernel/runtime health for node auto repair |
-  | kube-system | coredns | AWS addon defaults |
-  | amazon-cloudwatch | cloudwatch-agent, cloudwatch-agent-prometheus, fluent-bit, controller | reads host logs/metrics; AWS addon defaults |
+- **Logs**: Fluent Bit → CloudWatch (KMS, 14 days); one JSON access-log line per request with `trace_id`.
+- **Metrics**: Container Insights (enhanced), app RED metrics, node conntrack, ENA allowances, HPA state.
+- **Traces**: OpenTelemetry (HTTP + DB spans) → CloudWatch agent → **X-Ray**.
+- **Alarms** (24, → SNS email): RPS > 10/s, latency, 5xx, unhealthy targets, pods crashloop/pending/unavailable,
+  HPA at max, node NotReady / at max / status check, per-node network & conntrack (multi-time-series), ENA,
+  control-plane P99/5xx/429, Aurora ACU, WAF 429s. Dashboard: `hw-overview`.
 
-  Every workload this repo deploys (app, db-bootstrap, ArgoCD, LB controller, external-dns, cluster-autoscaler,
-  kube-state-metrics, node-exporter) runs as non-root with no privilege escalation; PSA `restricted` is
-  **enforced** on `argocd`, `external-dns`, `hello-world` and `monitoring`.
-- More in [docs/GAPS.md](docs/GAPS.md).
+## Scaling & resilience
+
+HPA 2–6 replicas · Cluster Autoscaler (managed node group, max 4) · **VPA** (in-place resize) for ArgoCD ·
+ALB **pod readiness gates** + preStop + deregistration delay (0 errors deleting pods under load) · PDBs ·
+topology spread · node auto repair · NAT per AZ · Aurora 0.5 ACU floor (no cold start), 7-day backups.
+
+## Deploy from scratch
+
+1. Register a domain; set SSM `/hw/alert_email` and `/hw/admin_cidrs` (SecureString).
+2. `export GITHUB_TOKEN=$(gh auth token) && make bootstrap`; point the registrar's NS at
+   `terraform -chdir=terraform/bootstrap output name_servers`.
+3. Laptop applies once (later changes go through Atlantis): `persistent` → first image (`make image`) → `cluster` → `ci` → `alarms`.
+4. Create the GitHub App (manual; see GAPS), store `hw/github/app` + `hw/github/webhook-secret` in Secrets Manager,
+   run `scripts/argocd-pr-diff-token.sh`.
+5. ArgoCD syncs everything in `gitops/apps/`.
+
+ArgoCD UI: `kubectl -n argocd port-forward svc/argocd-server 8080:443` (password: `argocd-initial-admin-secret`).
+
+## Power off / on
+
+```bash
+scripts/.venv/bin/python scripts/power.py status
+scripts/.venv/bin/python scripts/power.py down --yes   # alarms off, pause CA auto-sync, drain + nodes→0, stop Aurora (parallel)
+scripts/.venv/bin/python scripts/power.py up --yes     # Aurora + nodes back, CA + auto-sync on, app check, alarms on
+```
+
+## Cost (us-east-2, approximate)
+
+| | ~$/day |
+|---|---|
+| EKS control plane | 2.40 |
+| NAT gateways ×2 (+ IPs) | 2.40 |
+| 3 × m7g.medium | 2.95 |
+| Aurora 0.5 ACU floor | 1.45 |
+| ALB + WAF | 0.85 |
+| KMS, Route 53, Secrets, CloudWatch | ~0.50 |
+| **Running** | **~10.50** |
+| **Powered down** (`power.py down`: nodes + Aurora off) | **~6.10** |
+
+Budget: $100/month (account hard limit) with alerts at 50/75/90 % — keep it powered down when idle.
 
 ## Threat model (short)
 
-- **Exposed:** ALB on 443/80 only, behind AWS WAF (per-IP rate limit + AWS managed rules). Nothing else is internet-reachable; `/metrics` listens on a separate port that no
-  Service or Ingress exposes. ArgoCD is port-forward only.
-- **Compromised app pod:** can log in to Postgres as `hw_app` (SELECT only) and nothing else in AWS; IMDS hop limit
-  blocks the node role; PSA restricted blocks privilege escalation.
-- **Compromised db-bootstrap Job:** master DB credentials (DB admin), no other AWS access.
-- **Compromised ArgoCD:** cluster-admin in Kubernetes (it deploys everything); AWS access limited to reading
-  `/hw/gitops/*`. Mitigated by keeping it private; next steps in GAPS.
+| If compromised | Can reach |
+|---|---|
+| App pod | Aurora as `hw_app` (SELECT); its OTLP/DNS paths; nothing else in AWS |
+| ArgoCD | cluster-admin in Kubernetes; AWS: read `/hw/gitops/*` |
+| Atlantis | AdministratorAccess — the biggest blast radius (see GAPS) |
+| PR diff runner | read-only ArgoCD API; no AWS role, no Kubernetes token |
+| Push runner (main only) | ECR push to one repo + `kms:Sign` with the cosign key |
