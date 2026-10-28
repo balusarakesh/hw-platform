@@ -18,10 +18,12 @@ configs:
     exec.enabled: "false"
     # Local account for the PR diff workflow: API key only (no UI/CLI login), read-only via rbac below.
     accounts.pr-diff: apiKey
-  # pr-diff may only read applications (enough for `argocd app diff`); everyone else keeps the defaults.
+  # pr-diff may only read applications and their project (both needed by `argocd app diff --revision`);
+  # everyone else keeps the defaults.
   rbac:
     policy.csv: |
       p, role:pr-diff, applications, get, */*, allow
+      p, role:pr-diff, projects, get, default, allow
       g, pr-diff, role:pr-diff
   params:
     # UI/API is only reachable via `kubectl port-forward`, never an Ingress.
