@@ -1,0 +1,24 @@
+# PR-diff runners: GitHub over HTTPS and the private ArgoCD API (argocd-server pod port 8080, Service 443).
+{{- $ns := "arc-runners" }}
+{{ include "np.defaultDeny" (dict "ns" $ns) }}
+---
+{{ include "np.baseEgress" (dict "ns" $ns "root" .) }}
+---
+{{ include "np.httpsOut" (dict "ns" $ns) }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-argocd-server
+  namespace: {{ $ns }}
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: argocd }
+          podSelector:
+            matchLabels: { app.kubernetes.io/name: argocd-server }
+      ports:
+        - { protocol: TCP, port: 8080 }
