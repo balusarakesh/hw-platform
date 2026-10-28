@@ -22,6 +22,49 @@ locals {
   }
 }
 
+locals {
+  node_group_defaults = {
+    ami_type = "AL2023_ARM_64_STANDARD"
+
+    # min 0 lets power.py scale to zero; Cluster Autoscaler moves between 1..max while running.
+    # The module ignores desired_size drift, so neither fights Terraform.
+    min_size     = 0
+    max_size     = 4
+    desired_size = var.node_desired_size
+
+    block_device_mappings = {
+      xvda = {
+        device_name = "/dev/xvda"
+        ebs = {
+          volume_size           = 30
+          volume_type           = "gp3"
+          encrypted             = true # AWS-managed aws/ebs key
+          delete_on_termination = true
+        }
+      }
+    }
+
+    # IMDSv2 only, hop limit 1: pods can't reach the node's instance role via IMDS.
+    metadata_options = {
+      http_endpoint               = "enabled"
+      http_tokens                 = "required"
+      http_put_response_hop_limit = 1
+    }
+
+    node_repair_config = {
+      enabled = true
+    }
+
+    update_config = {
+      max_unavailable = 1
+    }
+
+    labels = {
+      role = "general"
+    }
+  }
+}
+
 module "eks" {
   source  = "terraform-aws-modules/eks/aws"
   version = "21.29.0"
@@ -46,6 +89,11 @@ module "eks" {
   # admin's access entry (locking the operator out) and the KMS key administrator. The entry key stays
   # "cluster_creator" so the existing access entry isn't replaced. Atlantis has its own entry (atlantis.tf).
   enable_cluster_creator_admin_permissions = false
+
+  # The VPC resource controller (EKS control plane) manages trunk/branch ENIs for security groups for pods.
+  iam_role_additional_policies = {
+    AmazonEKSVPCResourceController = "arn:${local.partition}:iam::aws:policy/AmazonEKSVPCResourceController"
+  }
   access_entries = {
     cluster_creator = {
       principal_arn = var.admin_principal_arn
@@ -80,7 +128,12 @@ module "eks" {
         # Prefix delegation lifts the t4g.medium pod limit from 17 to 110.
         env = {
           ENABLE_PREFIX_DELEGATION = "true"
-          WARM_PREFIX_TARGET       = "1"
+          # Security groups for pods (SecurityGroupPolicy): pods get branch ENIs with their own SG.
+          # "standard" keeps NetworkPolicy enforcement and SNAT for traffic leaving the VPC (that
+          # traffic uses the node SG; in-VPC traffic uses the pod SG).
+          ENABLE_POD_ENI                    = "true"
+          POD_SECURITY_GROUP_ENFORCING_MODE = "standard"
+          WARM_PREFIX_TARGET                = "1"
         }
         # Enforce Kubernetes NetworkPolicies natively (no Calico needed).
         enableNetworkPolicy = "true"
@@ -124,48 +177,17 @@ module "eks" {
     }
   }
 
+  # Blue/green node groups while migrating t4g -> m7g (security groups for pods need ENI trunking).
+  # "general" (t4g) is drained and then removed in a follow-up PR, so Atlantis never evicts itself
+  # by replacing the group it runs on in the middle of an apply.
   eks_managed_node_groups = {
-    general = {
-      ami_type       = "AL2023_ARM_64_STANDARD"
+    general = merge(local.node_group_defaults, {
+      instance_types = ["t4g.medium"]
+      max_size       = 3
+    })
+    m7g = merge(local.node_group_defaults, {
       instance_types = [var.node_instance_type]
-
-      # min 0 lets power.py scale to zero; Cluster Autoscaler moves between 1..max while running.
-      # The module ignores desired_size drift, so neither fights Terraform.
-      min_size     = 0
-      max_size     = 3
-      desired_size = var.node_desired_size
-
-      block_device_mappings = {
-        xvda = {
-          device_name = "/dev/xvda"
-          ebs = {
-            volume_size           = 30
-            volume_type           = "gp3"
-            encrypted             = true # AWS-managed aws/ebs key
-            delete_on_termination = true
-          }
-        }
-      }
-
-      # IMDSv2 only, hop limit 1: pods can't reach the node's instance role via IMDS.
-      metadata_options = {
-        http_endpoint               = "enabled"
-        http_tokens                 = "required"
-        http_put_response_hop_limit = 1
-      }
-
-      node_repair_config = {
-        enabled = true
-      }
-
-      update_config = {
-        max_unavailable = 1
-      }
-
-      labels = {
-        role = "general"
-      }
-    }
+    })
   }
 }
 

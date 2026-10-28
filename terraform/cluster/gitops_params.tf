@@ -27,6 +27,7 @@ locals {
     db_master_username   = local.p.aurora_master_username
     db_master_secret_arn = local.p.aurora_master_secret_arn
     waf_acl_arn          = local.p.waf_acl_arn
+    app_pod_sg_id        = aws_security_group.app_pods.id
     atlantis_host        = "atlantis.${local.p.domain}"
     tfstate_bucket       = "${var.project}-tfstate-${local.account_id}-${var.region}"
     tfstate_kms_key_arn  = data.aws_kms_alias.tfstate.target_key_arn
