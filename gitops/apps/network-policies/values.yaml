@@ -1,0 +1,5 @@
+# Values for the network-policies release (gitops/charts/network-policies). Defaults match this VPC.
+vpcCidr: 10.20.0.0/16
+serviceCidr: 172.20.0.0/16
+kubeDnsIp: 172.20.0.10
+dbSubnetCidrs: [10.20.200.0/24, 10.20.201.0/24]

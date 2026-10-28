@@ -1,0 +1,29 @@
+# Controllers that only talk to AWS APIs / GitHub / the EKS API over HTTPS, plus their probe/webhook ports.
+{{- $root := . }}
+{{- range $ns, $ports := dict "external-dns" (list 7979) "external-secrets" (list 10250 8081) "atlantis" (list 4141) "arc-systems" (list) "arc-runners-push" (list) }}
+---
+{{ include "np.defaultDeny" (dict "ns" $ns) }}
+---
+{{ include "np.baseEgress" (dict "ns" $ns "root" $root) }}
+---
+{{ include "np.httpsOut" (dict "ns" $ns) }}
+{{- if $ports }}
+---
+# Ingress from inside the VPC only: ALB (atlantis webhook), kubelet probes, EKS API (ESO webhook).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-vpc-ingress
+  namespace: {{ $ns }}
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - ipBlock: { cidr: {{ $root.Values.vpcCidr }} }
+      ports:
+        {{- range $ports }}
+        - { protocol: TCP, port: {{ . }} }
+        {{- end }}
+{{- end }}
+{{- end }}

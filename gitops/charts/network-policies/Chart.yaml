@@ -1,0 +1,5 @@
+apiVersion: v2
+name: network-policies
+description: Default-deny NetworkPolicies + explicit allows for every namespace this repo owns.
+type: application
+version: 0.1.0

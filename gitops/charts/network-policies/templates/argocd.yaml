@@ -1,0 +1,4 @@
+# ArgoCD: the chart already ships allow-ingress policies for server/repo-server/redis/controller; this
+# adds namespace-wide default-deny INGRESS (covers applicationset-controller and anything new).
+# Egress stays open: ArgoCD needs git, Helm/OCI registries, SSM (helmfile plugin) and the EKS API.
+{{ include "np.defaultDeny" (dict "ns" "argocd" "types" (list "Ingress")) }}

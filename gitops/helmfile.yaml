@@ -122,3 +122,10 @@ releases:
     chart: ./charts/image-policies
     values:
       - apps/image-policies/values.yaml
+
+  # Default-deny NetworkPolicies + explicit allows for every namespace we own (one place to review).
+  - name: network-policies
+    namespace: argocd
+    chart: ./charts/network-policies
+    values:
+      - apps/network-policies/values.yaml
