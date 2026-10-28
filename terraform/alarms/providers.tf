@@ -61,7 +61,8 @@ data "aws_ec2_instance_type" "node" {
 }
 
 locals {
-  node_instance_type = data.aws_ec2_instance_type.node.instance_type
+  node_instance_type  = data.aws_ec2_instance_type.node.instance_type
+  node_group_max_size = data.aws_eks_node_group.general.scaling_config[0].max_size
   # Sustained (baseline) bandwidth of the default network card, Gbps.
   node_baseline_bandwidth_gbps = one([
     for c in data.aws_ec2_instance_type.node.network_cards : c.baseline_bandwidth
