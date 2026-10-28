@@ -69,3 +69,36 @@ resource "aws_vpc_security_group_ingress_rule" "rds_from_app_pods" {
   to_port                      = local.p.aurora_port
   description                  = "Postgres from hello-world pods"
 }
+
+# Return direction for the rules above. CoreDNS and the CloudWatch agent (hostNetwork DaemonSet) sit
+# behind the node SG, which by default only accepts DNS from itself. Without these, pods carrying
+# hw-app-pods couldn't resolve names (new DB connections hung, db-bootstrap timed out on
+# secretsmanager DNS) or export traces.
+resource "aws_vpc_security_group_ingress_rule" "nodes_dns_from_app_pods" {
+  for_each = toset(["udp", "tcp"])
+
+  security_group_id            = module.eks.node_security_group_id
+  referenced_security_group_id = aws_security_group.app_pods.id
+  ip_protocol                  = each.value
+  from_port                    = 53
+  to_port                      = 53
+  description                  = "DNS from hello-world pods (${each.value})"
+}
+
+resource "aws_vpc_security_group_egress_rule" "app_pods_otlp" {
+  security_group_id            = aws_security_group.app_pods.id
+  referenced_security_group_id = module.eks.node_security_group_id
+  ip_protocol                  = "tcp"
+  from_port                    = 4316
+  to_port                      = 4318
+  description                  = "OTLP traces to the CloudWatch agent"
+}
+
+resource "aws_vpc_security_group_ingress_rule" "nodes_otlp_from_app_pods" {
+  security_group_id            = module.eks.node_security_group_id
+  referenced_security_group_id = aws_security_group.app_pods.id
+  ip_protocol                  = "tcp"
+  from_port                    = 4316
+  to_port                      = 4318
+  description                  = "OTLP traces from hello-world pods"
+}
