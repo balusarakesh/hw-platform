@@ -4,6 +4,9 @@ kind: Application
 metadata:
   name: kyverno
   annotations:
+    # Server-side diff: the chart renders empty maps (labels: {}) and Kyverno fills in policy defaults;
+    # client-side diff saw both as permanent drift.
+    argocd.argoproj.io/compare-options: ServerSideDiff=true
     # kyverno (CRDs + webhook) first, then the policies.
     argocd.argoproj.io/sync-wave: "-1"
   namespace: argocd
