@@ -1,6 +1,6 @@
 # Controllers that only talk to AWS APIs / GitHub / the EKS API over HTTPS, plus their probe/webhook ports.
 {{- $root := . }}
-{{- range $ns, $ports := dict "external-dns" (list 7979) "external-secrets" (list 10250 8081) "atlantis" (list 4141) "arc-systems" (list) "arc-runners-push" (list) }}
+{{- range $ns, $ports := dict "external-dns" (list 7979) "external-secrets" (list 10250 8081) "atlantis" (list 4141) "arc-systems" (list) "arc-runners-push" (list) "vpa-system" (list 8000) "kyverno" (list 9443) }}
 ---
 {{ include "np.defaultDeny" (dict "ns" $ns) }}
 ---

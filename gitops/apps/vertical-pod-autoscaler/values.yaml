@@ -1,0 +1,106 @@
+# Vertical Pod Autoscaler: right-sizes requests/limits from observed usage (incl. OOM events).
+# EKS 1.36 supports in-place pod resize, so updateMode InPlaceOrRecreate changes a running pod's
+# resources without restarting it when possible. One replica per component (cost; small cluster).
+# VPA objects for the workloads it manages are in extraObjects below.
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65534
+  seccompProfile:
+    type: RuntimeDefault
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: [ALL]
+
+admissionController:
+  replicas: 1
+  image:
+    repository: registry.k8s.io/autoscaling/vpa-admission-controller
+    tag: 1.8.1@sha256:13304735dbffe3bdf4bc3865f093690a32d0048f61b5e4be7f634ed51cb9ff2b
+  resources:
+    requests: { cpu: 10m, memory: 32Mi }
+    limits: { cpu: 200m, memory: 128Mi }
+  certGen:
+    image:
+      repository: registry.k8s.io/ingress-nginx/kube-webhook-certgen
+      tag: v20231011-8b53cabe0@sha256:a7943503b45d552785aa3b5e457f169a5661fb94d82b8a3373bcd9ebaf9aac80
+    resources:
+      requests: { cpu: 10m, memory: 16Mi }
+      limits: { cpu: 100m, memory: 64Mi }
+
+recommender:
+  replicas: 1
+  image:
+    repository: registry.k8s.io/autoscaling/vpa-recommender
+    tag: 1.8.1@sha256:edf874b830984d1df9d60f839874eba42de3465051922b929754edc42ea0f69b
+  resources:
+    requests: { cpu: 10m, memory: 64Mi }
+    limits: { cpu: 200m, memory: 256Mi }
+
+updater:
+  replicas: 1
+  image:
+    repository: registry.k8s.io/autoscaling/vpa-updater
+    tag: 1.8.1@sha256:b4a03d56131cc6f6c44cd91982b6db5961496f18b9bc24abe1c4b6160aefe04a
+  resources:
+    requests: { cpu: 10m, memory: 32Mi }
+    limits: { cpu: 200m, memory: 128Mi }
+
+# One VPA per ArgoCD component (the ones that OOMKilled or grow with the number of apps).
+# minAllowed keeps today's working floor; maxAllowed caps what VPA may give on these small nodes.
+# RequestsAndLimits: VPA scales the limit proportionally with the request.
+extraObjects:
+  - apiVersion: autoscaling.k8s.io/v1
+    kind: VerticalPodAutoscaler
+    metadata:
+      name: argocd-server
+      namespace: argocd
+      annotations:
+        argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+    spec:
+      targetRef: { apiVersion: apps/v1, kind: Deployment, name: argocd-server }
+      updatePolicy: { updateMode: InPlaceOrRecreate }
+      resourcePolicy:
+        containerPolicies:
+          - containerName: server
+            controlledValues: RequestsAndLimits
+            minAllowed: { cpu: 25m, memory: 128Mi }
+            maxAllowed: { cpu: 500m, memory: 1536Mi }
+  - apiVersion: autoscaling.k8s.io/v1
+    kind: VerticalPodAutoscaler
+    metadata:
+      name: argocd-repo-server
+      namespace: argocd
+      annotations:
+        argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+    spec:
+      targetRef: { apiVersion: apps/v1, kind: Deployment, name: argocd-repo-server }
+      updatePolicy: { updateMode: InPlaceOrRecreate }
+      resourcePolicy:
+        containerPolicies:
+          - containerName: repo-server
+            controlledValues: RequestsAndLimits
+            minAllowed: { cpu: 50m, memory: 128Mi }
+            maxAllowed: { cpu: "1", memory: 1Gi }
+          - containerName: helmfile-plugin
+            controlledValues: RequestsAndLimits
+            minAllowed: { cpu: 50m, memory: 128Mi }
+            maxAllowed: { cpu: "1", memory: 2Gi }
+  - apiVersion: autoscaling.k8s.io/v1
+    kind: VerticalPodAutoscaler
+    metadata:
+      name: argocd-application-controller
+      namespace: argocd
+      annotations:
+        argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+    spec:
+      targetRef: { apiVersion: apps/v1, kind: StatefulSet, name: argocd-application-controller }
+      updatePolicy: { updateMode: InPlaceOrRecreate }
+      resourcePolicy:
+        containerPolicies:
+          - containerName: application-controller
+            controlledValues: RequestsAndLimits
+            minAllowed: { cpu: 100m, memory: 384Mi }
+            maxAllowed: { cpu: "1", memory: 2Gi }
