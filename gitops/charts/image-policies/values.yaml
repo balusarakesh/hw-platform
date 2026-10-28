@@ -1,0 +1,4 @@
+repository: ""
+publicKey: ""
+# Namespaces where unsigned hello-world images are rejected.
+namespaces: [hello-world]

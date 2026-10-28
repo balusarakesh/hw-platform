@@ -36,3 +36,9 @@ hpa:
 resources:
   requests: { cpu: 25m, memory: 48Mi }
   limits: { cpu: 250m, memory: 128Mi }
+
+# Pod-level security group (hw-app-pods): only these pods may reach Aurora.
+securityGroupPolicy:
+  enabled: true
+  securityGroupIds:
+    - "ref+awsssm://hw/gitops/app_pod_sg_id"

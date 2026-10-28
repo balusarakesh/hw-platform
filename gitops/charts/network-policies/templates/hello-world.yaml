@@ -1,0 +1,41 @@
+# hello-world: the ALB (target-type ip) and kubelet probes reach 8080; the Prometheus scraper reaches 9090.
+# Out: Aurora 5432, OTLP traces to the node's CloudWatch agent, HTTPS (Secrets Manager for db-bootstrap).
+{{- $ns := "hello-world" }}
+{{ include "np.defaultDeny" (dict "ns" $ns) }}
+---
+{{ include "np.baseEgress" (dict "ns" $ns "root" .) }}
+---
+{{ include "np.httpsOut" (dict "ns" $ns) }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-app
+  namespace: {{ $ns }}
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - ipBlock: { cidr: {{ .Values.vpcCidr }} }
+      ports:
+        - { protocol: TCP, port: 8080 }
+    - from:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: amazon-cloudwatch }
+        - ipBlock: { cidr: {{ .Values.vpcCidr }} }
+      ports:
+        - { protocol: TCP, port: 9090 }
+  egress:
+    - to:
+        {{- range .Values.dbSubnetCidrs }}
+        - ipBlock: { cidr: {{ . }} }
+        {{- end }}
+      ports:
+        - { protocol: TCP, port: 5432 }
+    - to:
+        - ipBlock: { cidr: {{ .Values.vpcCidr }} }
+        - ipBlock: { cidr: {{ .Values.serviceCidr }} }
+      ports:
+        - { protocol: TCP, port: 4317 }
+        - { protocol: TCP, port: 4318 }

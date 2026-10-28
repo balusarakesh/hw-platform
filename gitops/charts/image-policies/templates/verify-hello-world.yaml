@@ -1,0 +1,44 @@
+# Pods in the listed namespaces may only run hello-world images signed by CI's cosign key
+# (KMS alias/hw-cosign, signed in .github/workflows/app.yml). Checked at admission by Kyverno, which
+# fetches the signature from ECR with its Pod Identity role. No public transparency log: the image is
+# private, so the signature is verified against the static public key only.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: verify-hello-world-signature
+  annotations:
+    # Kyverno's CRDs come from the kyverno app (earlier sync wave).
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+    policies.kyverno.io/title: Verify hello-world image signatures
+spec:
+  background: false
+  webhookConfiguration:
+    failurePolicy: Fail
+    timeoutSeconds: 15
+  rules:
+    - name: cosign-kms-key
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces:
+                {{- toYaml .Values.namespaces | nindent 16 }}
+      verifyImages:
+        - imageReferences:
+            - {{ printf "%s*" (required "repository is required" .Values.repository) | quote }}
+          failureAction: Enforce
+          # Images are already pinned by digest in the chart; just require that and verify it.
+          mutateDigest: false
+          verifyDigest: true
+          required: true
+          imageRegistryCredentials:
+            providers: ["amazon"]
+          attestors:
+            - entries:
+                - keys:
+                    publicKeys: |-
+                      {{- required "publicKey is required" .Values.publicKey | nindent 22 }}
+                    rekor:
+                      ignoreTlog: true
+                    ctlog:
+                      ignoreSCT: true

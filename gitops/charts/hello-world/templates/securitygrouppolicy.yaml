@@ -1,0 +1,19 @@
+{{- if and .Values.securityGroupPolicy.enabled .Values.securityGroupPolicy.securityGroupIds }}
+# Security groups for pods: the app and db-bootstrap pods get their own ENI with the hw-app-pods SG
+# (terraform/cluster/app_pod_sg.tf), so only they can reach Aurora, not every pod on the node.
+apiVersion: vpcresources.k8s.aws/v1beta1
+kind: SecurityGroupPolicy
+metadata:
+  name: hello-world
+  labels:
+    {{- include "hello-world.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values: [hello-world, hello-world-db-bootstrap]
+  securityGroups:
+    groupIds:
+      {{- toYaml .Values.securityGroupPolicy.securityGroupIds | nindent 6 }}
+{{- end }}

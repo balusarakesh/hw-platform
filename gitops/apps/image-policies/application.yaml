@@ -1,0 +1,34 @@
+# Rendered by the helmfile plugin: `helmfile --selector name=image-policies template`.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: image-policies
+  annotations:
+    # Server-side diff: the chart renders empty maps (labels: {}) and Kyverno fills in policy defaults;
+    # client-side diff saw both as permanent drift.
+    argocd.argoproj.io/compare-options: ServerSideDiff=true
+    # kyverno (CRDs + webhook) first, then the policies.
+    argocd.argoproj.io/sync-wave: "1"
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/balusarakesh/hw-platform.git
+    targetRevision: main
+    path: gitops
+    plugin:
+      name: helmfile
+      env:
+        - name: RELEASE
+          value: image-policies
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kyverno
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true
