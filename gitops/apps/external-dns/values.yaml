@@ -1,3 +1,4 @@
+# NetworkPolicy regression test (PR closed without merge).
 # Values for the external-dns Helm release. `ref+awsssm://...` strings are resolved by helmfile (vals)
 # at render time from SSM /hw/gitops/*, which Terraform writes; nothing account-specific is in git.
 image:

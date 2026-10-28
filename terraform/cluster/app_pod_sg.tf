@@ -1,3 +1,4 @@
+# NetworkPolicy regression test (PR closed without merge).
 # Security group for the hello-world pods (attached per pod by a SecurityGroupPolicy in the chart).
 # Only these pods can reach Aurora; other pods on the same nodes can't, even though they share the node SG.
 #
