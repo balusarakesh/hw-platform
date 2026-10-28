@@ -31,3 +31,6 @@ spec:
       labels:
         pod-security.kubernetes.io/enforce: restricted
         pod-security.kubernetes.io/warn: restricted
+        # LB controller injects a readiness gate: a pod only counts as Ready once the ALB reports its
+        # target healthy, so rollouts never remove old pods before new targets can take traffic.
+        elbv2.k8s.aws/pod-readiness-gate-inject: enabled
