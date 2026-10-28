@@ -64,12 +64,6 @@ variable "node_group_max_size" {
 
 # Instance-type specific limits. Source: `aws ec2 describe-instance-types --instance-types t4g.medium`
 # (NetworkCards[0].BaselineBandwidthInGbps = 0.256, burst "up to 5 Gigabit"). Change with the instance type.
-variable "node_baseline_bandwidth_gbps" {
-  description = "Per-node sustained (baseline) network bandwidth in Gbps."
-  type        = number
-  default     = 0.256
-}
-
 variable "node_bandwidth_alarm_percent" {
   description = "Alarm when a node's network throughput exceeds this % of baseline for 5 minutes."
   type        = number
@@ -82,6 +76,8 @@ variable "conntrack_table_alarm_percent" {
   default     = 80
 }
 
+# The EC2 conntrack allowance per instance isn't exposed by DescribeInstanceTypes, so this stays a
+# hand-set threshold (the ENA conntrack_allowance_available counter shows the live headroom).
 variable "conntrack_allowance_min_available" {
   description = "Alarm when the ENA tracked-connection allowance left on any node drops below this."
   type        = number

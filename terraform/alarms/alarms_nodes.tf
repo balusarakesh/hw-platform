@@ -44,8 +44,9 @@ resource "aws_cloudwatch_metric_alarm" "nodes_at_max" {
   ok_actions    = local.actions
 }
 
-# Every instance in this (single-purpose) account is an EKS node, so one Metrics Insights query
-# over AWS/EC2 covers nodes that come and go without per-instance alarms.
+# Multi-time-series alarm: the Metrics Insights query is re-run at every evaluation and GROUP BY
+# InstanceId evaluates each instance on its own, so nodes that come and go are covered without
+# per-instance alarms. Every instance in this (single-purpose) account is an EKS node.
 resource "aws_cloudwatch_metric_alarm" "ec2_status_check" {
   alarm_name        = "hw-nodes-ec2-status-check"
   alarm_description = "An EC2 instance is failing system/instance/EBS status checks. Node auto repair should replace it. Check first: EC2 console status checks, AWS Health events for the instance."
@@ -58,9 +59,9 @@ resource "aws_cloudwatch_metric_alarm" "ec2_status_check" {
 
   metric_query {
     id          = "q1"
-    expression  = "SELECT MAX(StatusCheckFailed) FROM SCHEMA(\"AWS/EC2\", InstanceId)"
+    expression  = "SELECT MAX(StatusCheckFailed) FROM SCHEMA(\"AWS/EC2\", InstanceId) GROUP BY InstanceId ORDER BY MAX() DESC"
     period      = 60
-    label       = "Status check failed (any instance)"
+    label       = "Status check failed (per instance)"
     return_data = true
   }
 
@@ -70,19 +71,22 @@ resource "aws_cloudwatch_metric_alarm" "ec2_status_check" {
 
 resource "aws_cloudwatch_metric_alarm" "node_network_throughput" {
   alarm_name        = "hw-nodes-network-throughput"
-  alarm_description = "A node has been above ${var.node_bandwidth_alarm_percent}% of its baseline bandwidth (${var.node_baseline_bandwidth_gbps} Gbps) for 5 minutes; it is spending burst credits and will be shaped. Check first: per-node network on hw-overview, ENA bw_*_allowance_exceeded."
-
-  namespace   = "ContainerInsights"
-  metric_name = "node_network_total_bytes" # bytes/second
-  dimensions  = { ClusterName = local.cluster_name }
-  statistic   = "Maximum"
-  period      = 60
+  alarm_description = "A node has been above ${var.node_bandwidth_alarm_percent}% of its baseline bandwidth (${local.node_baseline_bandwidth_gbps} Gbps on ${local.node_instance_type}) for 5 minutes; it will be shaped. The alarm lists which node(s). Check first: per-node network on hw-overview, ENA bw_*_allowance_exceeded."
 
   comparison_operator = "GreaterThanThreshold"
-  threshold           = var.node_baseline_bandwidth_gbps * 1000000000 / 8 * var.node_bandwidth_alarm_percent / 100
+  threshold           = local.node_baseline_bandwidth_gbps * 1000000000 / 8 * var.node_bandwidth_alarm_percent / 100
   evaluation_periods  = 5
   datapoints_to_alarm = 5
   treat_missing_data  = "notBreaching"
+
+  # Multi-time-series: one evaluation per node (bytes/second).
+  metric_query {
+    id          = "q1"
+    expression  = "SELECT MAX(node_network_total_bytes) FROM SCHEMA(ContainerInsights, ClusterName, InstanceId, NodeName) WHERE ClusterName = '${local.cluster_name}' GROUP BY NodeName ORDER BY MAX() DESC"
+    period      = 60
+    label       = "Network bytes/s (per node)"
+    return_data = true
+  }
 
   alarm_actions = local.actions
   ok_actions    = local.actions
@@ -91,39 +95,22 @@ resource "aws_cloudwatch_metric_alarm" "node_network_throughput" {
 # Linux netfilter conntrack table (kube-proxy/iptables). When full, new connections are dropped.
 resource "aws_cloudwatch_metric_alarm" "node_conntrack_table" {
   alarm_name        = "hw-nodes-conntrack-table"
-  alarm_description = "A node's conntrack table is > ${var.conntrack_table_alarm_percent}% full for 5 minutes; new connections will be dropped when it fills. Check first: per-node conntrack on hw-overview, connection-heavy pods, nf_conntrack_max."
+  alarm_description = "A node's conntrack table is > ${var.conntrack_table_alarm_percent}% full (limit ${local.node_conntrack_limit} on ${local.node_instance_type}) for 5 minutes; new connections are dropped when it fills. The alarm lists which node(s). Check first: per-node conntrack on hw-overview, connection-heavy pods."
 
   comparison_operator = "GreaterThanThreshold"
-  threshold           = var.conntrack_table_alarm_percent
+  # Metrics Insights can't divide two metrics, so the % is applied to the derived limit instead.
+  threshold           = floor(local.node_conntrack_limit * var.conntrack_table_alarm_percent / 100)
   evaluation_periods  = 5
   datapoints_to_alarm = 5
   treat_missing_data  = "notBreaching"
 
+  # Multi-time-series: one evaluation per node.
   metric_query {
-    id          = "pct"
-    expression  = "100 * entries / limit"
-    label       = "conntrack % used (worst node)"
+    id          = "q1"
+    expression  = "SELECT MAX(node_nf_conntrack_entries) FROM SCHEMA(\"hw/Prometheus\", ClusterName, NodeName) WHERE ClusterName = '${local.cluster_name}' GROUP BY NodeName ORDER BY MAX() DESC"
+    period      = 60
+    label       = "conntrack entries (per node)"
     return_data = true
-  }
-  metric_query {
-    id = "entries"
-    metric {
-      namespace   = "hw/Prometheus"
-      metric_name = "node_nf_conntrack_entries"
-      dimensions  = { ClusterName = local.cluster_name }
-      stat        = "Maximum"
-      period      = 60
-    }
-  }
-  metric_query {
-    id = "limit"
-    metric {
-      namespace   = "hw/Prometheus"
-      metric_name = "node_nf_conntrack_entries_limit"
-      dimensions  = { ClusterName = local.cluster_name }
-      stat        = "Minimum"
-      period      = 60
-    }
   }
 
   alarm_actions = local.actions
@@ -133,7 +120,8 @@ resource "aws_cloudwatch_metric_alarm" "node_conntrack_table" {
 # ENA driver counters: packets queued or dropped because an instance exceeded an EC2 network
 # allowance. Published by the CloudWatch agent's ethtool plugin (namespace hw/ENA) as cumulative
 # counters, aggregated across nodes (no dimensions). The alarm fires on the per-minute increase
-# (DIFF of the cluster-wide Sum). Not "any increase": burstable t4g nodes exceed their allowances
+# (DIFF of the cluster-wide Sum). These stay cluster-wide on purpose: they are cumulative counters, and
+# a per-instance rate needs DIFF/RATE, which multi-time-series (Metrics Insights) alarms can't apply. Not "any increase": burstable t4g nodes exceed their allowances
 # briefly during image pulls, which isn't worth a page.
 locals {
   ena_allowances = {
@@ -180,18 +168,22 @@ resource "aws_cloudwatch_metric_alarm" "ena_allowance_exceeded" {
 
 resource "aws_cloudwatch_metric_alarm" "ena_conntrack_allowance_low" {
   alarm_name        = "hw-nodes-ena-conntrack-allowance-low"
-  alarm_description = "A node has fewer than ${var.conntrack_allowance_min_available} tracked connections left before hitting the EC2 conntrack allowance. Check first: connection counts per pod, idle-timeout settings, instance size."
-
-  namespace   = "hw/ENA"
-  metric_name = "ethtool_conntrack_allowance_available"
-  statistic   = "Minimum"
-  period      = 60
+  alarm_description = "A node has fewer than ${var.conntrack_allowance_min_available} tracked connections left before hitting the EC2 conntrack allowance. The alarm lists which instance(s). Check first: connection counts per pod, idle-timeout settings, instance size."
 
   comparison_operator = "LessThanThreshold"
   threshold           = var.conntrack_allowance_min_available
   evaluation_periods  = 5
   datapoints_to_alarm = 5
   treat_missing_data  = "notBreaching"
+
+  # Multi-time-series: one evaluation per instance (gauge, so no DIFF needed).
+  metric_query {
+    id          = "q1"
+    expression  = "SELECT MIN(ethtool_conntrack_allowance_available) FROM SCHEMA(\"hw/ENA\", InstanceId, driver, interface) GROUP BY InstanceId ORDER BY MIN() ASC"
+    period      = 60
+    label       = "ENA conntrack allowance available (per instance)"
+    return_data = true
+  }
 
   alarm_actions = local.actions
   ok_actions    = local.actions

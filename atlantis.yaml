@@ -7,7 +7,7 @@
 # (GitHub provider token) and is only ever applied from a laptop.
 version: 3
 automerge: false
-parallel_plan: true
+parallel_plan: false
 parallel_apply: false
 
 projects:
