@@ -25,9 +25,11 @@ variable "kubernetes_version" {
 }
 
 variable "node_instance_type" {
-  description = "Managed node group instance type (arm64/Graviton)."
+  # m7g.medium, not t4g: security groups for pods need ENI trunking, which no t-family type supports
+  # (amazon-vpc-resource-controller-k8s limits.go: m7g.medium IsTrunkingCompatible=true, 4 branch ENIs).
+  description = "Managed node group instance type (arm64/Graviton, must support ENI trunking)."
   type        = string
-  default     = "t4g.medium"
+  default     = "m7g.medium"
 }
 
 variable "node_desired_size" {

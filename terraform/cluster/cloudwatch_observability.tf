@@ -115,6 +115,17 @@ locals {
               }
             }
           }
+          # Traces: the app exports OTLP spans to this agent (ClusterIP service cloudwatch-agent,
+          # ports 4317 gRPC / 4318 HTTP); the agent forwards them to AWS X-Ray (role has
+          # AWSXrayWriteOnlyAccess via attach_aws_cloudwatch_observability_policy).
+          traces = {
+            traces_collected = {
+              otlp = {
+                grpc_endpoint = "0.0.0.0:4317"
+                http_endpoint = "0.0.0.0:4318"
+              }
+            }
+          }
         }
         resources = {
           requests = { cpu = "50m", memory = "128Mi" }
