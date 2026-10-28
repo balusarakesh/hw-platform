@@ -1,5 +1,13 @@
-# Defaults; environment values come from gitops/apps/arc-runners/values.yaml.
+# Defaults; environment values come from gitops/apps/arc-runners*/values.yaml.
 secretStore: aws-secrets-manager
 githubAppSecretKey: hw/github/app
 argocdTokenSecretKey: hw/argocd/pr-diff-token
+# The PR-diff runners need the read-only ArgoCD token; the push runners don't.
+argocdToken:
+  enabled: true
+# Dedicated ServiceAccount for runner pods, so a Pod Identity association can bind an IAM role to
+# exactly these runners (push runners only). Off = upstream default (no AWS identity).
+runnerServiceAccount:
+  create: false
+  name: ""
 gha-runner-scale-set: {}
