@@ -87,3 +87,15 @@ resource "github_actions_variable" "aws_region" {
   variable_name = "AWS_REGION"
   value         = var.region
 }
+
+# ECR repo URL for the publish job in .github/workflows/app.yml (not secret; keeps the account ID
+# out of workflow files). Looked up, because the repo is created by the persistent stack.
+data "aws_ecr_repository" "hello_world" {
+  name = "hello-world"
+}
+
+resource "github_actions_variable" "ecr_repository_url" {
+  repository    = github_repository.this.name
+  variable_name = "ECR_REPOSITORY_URL"
+  value         = data.aws_ecr_repository.hello_world.repository_url
+}
