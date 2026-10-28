@@ -177,14 +177,9 @@ module "eks" {
     }
   }
 
-  # Blue/green node groups while migrating t4g -> m7g (security groups for pods need ENI trunking).
-  # "general" (t4g) is drained and then removed in a follow-up PR, so Atlantis never evicts itself
-  # by replacing the group it runs on in the middle of an apply.
+  # Migrated t4g -> m7g blue/green (security groups for pods need ENI trunking): the m7g group was
+  # added first, the t4g group drained, then removed, so Atlantis never evicted itself mid-apply.
   eks_managed_node_groups = {
-    general = merge(local.node_group_defaults, {
-      instance_types = ["t4g.medium"]
-      max_size       = 3
-    })
     m7g = merge(local.node_group_defaults, {
       instance_types = [var.node_instance_type]
     })
