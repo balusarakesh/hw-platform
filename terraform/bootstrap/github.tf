@@ -78,6 +78,20 @@ resource "github_repository_ruleset" "main" {
       required_approving_review_count = 0
       dismiss_stale_reviews_on_push   = true
     }
+
+    # CI must pass before a PR can merge, so Atlantis' "mergeable" apply requirement also means
+    # "checks passed". Jobs skip (= pass) when their files didn't change (see the 'changes' jobs).
+    # integration_id 15368 = GitHub Actions: only Actions can satisfy these, not a spoofed status.
+    required_status_checks {
+      strict_required_status_checks_policy = false
+      dynamic "required_check" {
+        for_each = ["test", "image", "terraform-scan"]
+        content {
+          context        = required_check.value
+          integration_id = 15368
+        }
+      }
+    }
   }
 }
 
