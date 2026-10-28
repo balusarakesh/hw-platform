@@ -60,7 +60,7 @@ func migrate(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("connect as master: %w", err)
 	}
-	defer conn.Close(context.Background())
+	defer func() { _ = conn.Close(context.Background()) }()
 
 	appRole := pgx.Identifier{dbc.User}.Sanitize()
 	dbName := pgx.Identifier{dbc.Name}.Sanitize()
