@@ -26,7 +26,7 @@ resource "aws_cloudwatch_metric_alarm" "nodes_not_ready" {
 # Cluster Autoscaler can't add nodes past the node group's max_size.
 resource "aws_cloudwatch_metric_alarm" "nodes_at_max" {
   alarm_name        = "hw-nodes-at-max"
-  alarm_description = "Cluster has been at the node group max (${var.node_group_max_size} nodes) for 10 minutes; Cluster Autoscaler can't add more. Check first: hw-pods-pending, cluster-autoscaler logs, then raise max_size in terraform/cluster/eks.tf."
+  alarm_description = "Cluster has been at the node group max (${local.node_group_max_size} nodes) for 10 minutes; Cluster Autoscaler can't add more. Check first: hw-pods-pending, cluster-autoscaler logs, then raise max_size in terraform/cluster/eks.tf."
 
   namespace   = "ContainerInsights"
   metric_name = "cluster_node_count"
@@ -35,7 +35,8 @@ resource "aws_cloudwatch_metric_alarm" "nodes_at_max" {
   period      = 60
 
   comparison_operator = "GreaterThanOrEqualToThreshold"
-  threshold           = var.node_group_max_size
+  # Read from the live node group, so raising max_size in terraform/cluster moves this alarm too.
+  threshold           = local.node_group_max_size
   evaluation_periods  = 10
   datapoints_to_alarm = 10
   treat_missing_data  = "notBreaching"

@@ -95,7 +95,7 @@ locals {
           ["ContainerInsights", "cluster_node_count", "ClusterName", local.cn],
           [".", "cluster_failed_node_count", ".", "."],
         ]
-        annotations = { horizontal = [{ label = "node group max", value = var.node_group_max_size }] }
+        annotations = { horizontal = [{ label = "node group max", value = local.node_group_max_size }] }
       }
     },
     {

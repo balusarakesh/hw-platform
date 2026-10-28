@@ -56,12 +56,6 @@ variable "hpa_name" {
   default     = "hello-world"
 }
 
-variable "node_group_max_size" {
-  description = "Managed node group max_size (terraform/cluster eks.tf); alarm when the cluster sits at it."
-  type        = number
-  default     = 3
-}
-
 # Instance-type specific limits. Source: `aws ec2 describe-instance-types --instance-types t4g.medium`
 # (NetworkCards[0].BaselineBandwidthInGbps = 0.256, burst "up to 5 Gigabit"). Change with the instance type.
 variable "node_bandwidth_alarm_percent" {
