@@ -1,0 +1,161 @@
+# hello-world CI/CD.
+#   PR touching app/**   -> vet, test, lint, build the arm64 image, trivy scan (fails on fixable CRITICAL/HIGH).
+#   push to main         -> same, then (in-cluster, hw-runners-push) push to ECR tagged with the commit SHA,
+#                           sign the digest with cosign (KMS key), and open the image-bump PR for gitops/.
+# The deploy itself is the bump PR: it gets an ArgoCD diff comment and is merged by a human.
+name: app
+
+on:
+  pull_request:
+    paths: ["app/**", ".github/workflows/app.yml"]
+  push:
+    branches: [main]
+    paths: ["app/**"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: app-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    name: test
+    runs-on: ubuntu-24.04-arm
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: app/go.mod
+          cache-dependency-path: app/go.sum
+      - name: go vet + test
+        run: |
+          go vet ./...
+          go test ./...
+      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: v2.15.0
+          working-directory: app
+
+  image:
+    name: image
+    needs: test
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build linux/arm64 image
+        run: docker buildx build --platform linux/arm64 --provenance=false -t "hello-world:${GITHUB_SHA}" --load app
+      - name: Vulnerability scan (fixable CRITICAL/HIGH fail the build)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: hello-world:${{ github.sha }}
+          scanners: vuln
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
+      - name: Save image for the publish job
+        if: github.event_name == 'push'
+        run: docker save "hello-world:${GITHUB_SHA}" -o image.tar
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: github.event_name == 'push'
+        with:
+          name: image
+          path: image.tar
+          retention-days: 1
+
+  # In-cluster: GitHub-hosted runners can't get AWS credentials (the account SCP blocks IAM OIDC
+  # providers). hw-runners-push runs as a Pod Identity role limited to ECR push + kms:Sign.
+  publish:
+    name: publish
+    if: github.event_name == 'push'
+    needs: image
+    runs-on: hw-runners-push
+    concurrency:
+      group: publish-hello-world
+      cancel-in-progress: false
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      REPO: ${{ vars.ECR_REPOSITORY_URL }}
+      CRANE_VERSION: v0.22.1
+      CRANE_SHA256: 898c0cff975f898a33e8c4580bdafb0e7c02c7faa33374e946762f97c4ab7110
+      COSIGN_VERSION: v2.6.5
+      COSIGN_SHA256: 426193b4c5da4d4d643e822f48fe0cc8a476ca1782a272704831f5a0cef716d7
+      ECR_LOGIN_VERSION: 0.12.0
+      ECR_LOGIN_SHA256: 5bdd30fb6c7a92462f5b454cce1aa906ca7926a6c2e39efad9613a7bf7661fac
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: image
+
+      - name: Install crane, cosign, ECR credential helper (checksum-verified)
+        run: |
+          bin="$RUNNER_TEMP/bin"; mkdir -p "$bin"; cd "$RUNNER_TEMP"
+          curl -sSfL -o crane.tgz "https://github.com/google/go-containerregistry/releases/download/${CRANE_VERSION}/go-containerregistry_Linux_arm64.tar.gz"
+          echo "${CRANE_SHA256}  crane.tgz" | sha256sum -c -
+          tar -xzf crane.tgz -C "$bin" crane
+          curl -sSfL -o "$bin/cosign" "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign-linux-arm64"
+          echo "${COSIGN_SHA256}  $bin/cosign" | sha256sum -c -
+          curl -sSfL -o "$bin/docker-credential-ecr-login" "https://amazon-ecr-credential-helper-releases.s3.us-east-2.amazonaws.com/${ECR_LOGIN_VERSION}/linux-arm64/docker-credential-ecr-login"
+          echo "${ECR_LOGIN_SHA256}  $bin/docker-credential-ecr-login" | sha256sum -c -
+          chmod +x "$bin"/*
+          echo "$bin" >> "$GITHUB_PATH"
+          # crane and cosign authenticate to ECR through the helper (Pod Identity credentials).
+          mkdir -p "$HOME/.docker"
+          printf '{"credHelpers":{"%s":"ecr-login"}}\n' "${REPO%%/*}" > "$HOME/.docker/config.json"
+
+      - name: Push to ECR
+        id: push
+        run: |
+          ref="$(crane push image.tar "${REPO}:${GITHUB_SHA}")"
+          digest="${ref##*@}"
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+          echo "pushed ${REPO}:${GITHUB_SHA}@${digest}"
+
+      - name: Sign with cosign (KMS key alias/hw-cosign)
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        # --tlog-upload=false: private image, so the signature isn't published to the public Rekor log;
+        # the cluster's policy verifies against the KMS public key instead.
+        run: cosign sign --yes --tlog-upload=false --key awskms:///alias/hw-cosign "${REPO}@${DIGEST}"
+
+      - name: Open the image-bump PR
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        # GitHub App installation token (not GITHUB_TOKEN): PRs opened with GITHUB_TOKEN don't trigger
+        # other workflows, and the bump PR must get its ArgoCD diff comment.
+        run: |
+          set -euo pipefail
+          b64() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
+          now=$(date +%s)
+          jwt_h=$(printf '{"alg":"RS256","typ":"JWT"}' | b64)
+          jwt_p=$(printf '{"iat":%d,"exp":%d,"iss":"%s"}' $((now-60)) $((now+540)) "$GITHUB_APP_ID" | b64)
+          key="$RUNNER_TEMP/app.pem"; umask 077; printf '%s\n' "$GITHUB_APP_PRIVATE_KEY" > "$key"
+          jwt_s=$(printf '%s.%s' "$jwt_h" "$jwt_p" | openssl dgst -sha256 -sign "$key" | b64); rm -f "$key"
+          token=$(curl -sSf -X POST -H "Authorization: Bearer ${jwt_h}.${jwt_p}.${jwt_s}" -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/app/installations/${GITHUB_APP_INSTALLATION_ID}/access_tokens" | jq -r .token)
+          echo "::add-mask::${token}"
+
+          short="${GITHUB_SHA:0:7}"
+          branch="bump/hello-world-${short}"
+          git clone -q --depth 1 "https://x-access-token:${token}@github.com/${GITHUB_REPOSITORY}.git" repo
+          cd repo
+          git switch -q -c "$branch"
+          values=gitops/apps/hello-world/values.yaml
+          sed -i -E -e "s|^(  tag: ).*|\1\"${GITHUB_SHA}\"|" -e "s|^(  digest: ).*|\1\"${DIGEST}\"|" "$values"
+          git -c user.name="hw-platform-bot[bot]" -c user.email="5502882+hw-platform-bot[bot]@users.noreply.github.com" \
+            commit -qam "hello-world: deploy ${short}"
+          git push -q origin "$branch"
+          body=$(jq -n --arg sha "$GITHUB_SHA" --arg d "$DIGEST" --arg run "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+            '"Image `hello-world:\($sha)`\n\nDigest `\($d)` (signed with cosign, KMS key `alias/hw-cosign`).\n\nBuilt, scanned and pushed by \($run)."')
+          curl -sSf -X POST -H "Authorization: Bearer ${token}" -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/pulls" \
+            -d "$(jq -n --arg t "hello-world: deploy ${short}" --arg h "$branch" --argjson b "$body" '{title:$t, head:$h, base:"main", body:$b}')" \
+            | jq -r '"opened \(.html_url)"'
