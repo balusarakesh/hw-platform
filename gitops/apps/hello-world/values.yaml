@@ -42,3 +42,9 @@ securityGroupPolicy:
   enabled: true
   securityGroupIds:
     - "ref+awsssm://hw/gitops/app_pod_sg_id"
+
+# OpenTelemetry traces (HTTP + DB spans) -> CloudWatch agent (OTLP/HTTP, hostNetwork DaemonSet) -> X-Ray.
+tracing:
+  enabled: true
+  endpoint: http://cloudwatch-agent.amazon-cloudwatch:4318/v1/traces
+  sampleRatio: "1.0"
