@@ -11,6 +11,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/feature/rds/auth"
+	"github.com/exaring/otelpgx"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -89,6 +90,8 @@ func newIAMPool(ctx context.Context, c dbConfig, creds aws.CredentialsProvider) 
 		return nil
 	}
 	cfg.MaxConns = 4
+	// Every query (and connect) becomes a child span of the request span.
+	cfg.ConnConfig.Tracer = otelpgx.NewTracer()
 	// pgxpool connects lazily, so a paused Aurora doesn't block startup.
 	return pgxpool.NewWithConfig(ctx, cfg)
 }

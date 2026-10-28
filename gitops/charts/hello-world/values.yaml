@@ -45,3 +45,9 @@ ingress:
 resources:
   requests: { cpu: 25m, memory: 32Mi }
   limits: { cpu: 250m, memory: 128Mi }
+
+# Distributed tracing (OpenTelemetry SDK in the app). Off by default; the environment's values turn it on.
+tracing:
+  enabled: false
+  endpoint: ""
+  sampleRatio: "1.0"

@@ -15,6 +15,7 @@ import (
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"go.opentelemetry.io/otel/trace"
 )
 
 //go:embed web/index.html
@@ -62,7 +63,7 @@ func (a *app) routes() http.Handler {
 	mux.HandleFunc("GET /api/items", a.handleItems)
 	mux.HandleFunc("GET /healthz", a.handleHealthz)
 	mux.HandleFunc("GET /readyz", a.handleReadyz)
-	return securityHeaders(accessLog(instrument(mux)))
+	return securityHeaders(traced(accessLog(instrument(mux))))
 }
 
 func (a *app) handleIndex(w http.ResponseWriter, _ *http.Request) {
@@ -129,8 +130,19 @@ func accessLog(next http.Handler) http.Handler {
 			"duration_ms", time.Since(start).Milliseconds(),
 			"client_ip", clientIP(r),
 			"user_agent", r.UserAgent(),
+			// Correlate a log line with its trace in X-Ray / CloudWatch.
+			"trace_id", traceID(r),
 		)
 	})
+}
+
+// traceID returns the request's trace ID, or "" when tracing is off.
+func traceID(r *http.Request) string {
+	sc := trace.SpanContextFromContext(r.Context())
+	if !sc.HasTraceID() {
+		return ""
+	}
+	return sc.TraceID().String()
 }
 
 // clientIP returns the original client address: the first X-Forwarded-For hop when behind the ALB.
@@ -163,6 +175,12 @@ func serve(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	shutdownTracing, err := setupTracing(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = shutdownTracing(context.Background()) }()
+
 	awsCfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(dbc.Region))
 	if err != nil {
 		return err

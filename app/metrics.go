@@ -42,6 +42,7 @@ func instrument(next http.Handler) http.Handler {
 		start := time.Now()
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(rec, r)
+		nameSpanByRoute(r)
 
 		route := r.Pattern // set by ServeMux during routing
 		if route == "" {
