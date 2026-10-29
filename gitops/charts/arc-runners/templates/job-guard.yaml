@@ -1,0 +1,32 @@
+# Runner-side job guard: the runner runs this before every job (ACTIONS_RUNNER_HOOK_JOB_STARTED) and a
+# failing hook fails the job before any of its steps run. It lives on the runner, not in the repo's
+# workflow files, so a pull request can't edit or skip it. That matters on a public repo: a fork PR
+# runs the fork's own copy of the workflows, so `if:` guards in them prove nothing.
+#   pr    pull_request events whose head branch is in this repository (no forks)
+#   main  push events to refs/heads/main only
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: runner-job-guard
+data:
+  job-started.sh: |
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mode={{ required "jobGuard.mode is required" .Values.jobGuard.mode | quote }}
+    repository={{ required "jobGuard.repository is required" .Values.jobGuard.repository | quote }}
+    deny() { echo "::error::job-guard: $*"; exit 1; }
+
+    [[ "$GITHUB_REPOSITORY" == "$repository" ]] || deny "repository $GITHUB_REPOSITORY is not $repository"
+    case "$mode" in
+      pr)
+        [[ "$GITHUB_EVENT_NAME" == pull_request ]] || deny "event $GITHUB_EVENT_NAME not allowed (pull_request only)"
+        head=$(jq -r '.pull_request.head.repo.full_name // ""' "$GITHUB_EVENT_PATH")
+        [[ "$head" == "$repository" ]] || deny "pull requests from forks ($head) can't use these runners"
+        ;;
+      main)
+        [[ "$GITHUB_EVENT_NAME" == push && "$GITHUB_REF" == refs/heads/main ]] \
+          || deny "only pushes to main may use these runners (got $GITHUB_EVENT_NAME $GITHUB_REF)"
+        ;;
+      *) deny "unknown mode $mode" ;;
+    esac
+    echo "job-guard: allowed ($mode: $GITHUB_EVENT_NAME $GITHUB_REF)"
