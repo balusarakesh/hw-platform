@@ -10,7 +10,6 @@ One line per feature, grouped by what the assignment asks about. Each line: **wh
 - **No hard-coded IDs/ARNs in Git**: Terraform writes them to SSM `/hw/gitops/*`; helmfile reads `ref+awsssm://`.
 - **Sensitive inputs from SSM** (home IP, alert email) marked `sensitive` → never in plans, PR comments or Git.
 - **Drift-resistant**: EKS addon versions pinned; explicit cluster/KMS admins (not "whoever runs Terraform").
-- **Bootstrap is laptop-only** (state bucket, GitHub repo/rules, budget, DNS zone) → chicken-and-egg, documented.
 
 ## GitOps & CI/CD
 - **Single public monorepo**, PR-only changes on `main` (ruleset: no force-push/delete, PR required, checks required).

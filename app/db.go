@@ -74,7 +74,7 @@ func poolConfig(c dbConfig, user string) (*pgxpool.Config, error) {
 // newIAMPool returns a pool that logs in with a fresh RDS IAM auth token for every new
 // connection. Tokens live 15 minutes, but they only matter at connect time, so
 // minting one per connection means they never expire under us. Credentials come from
-// the pod's IRSA role via the default AWS credential chain; there is no password anywhere.
+// the pod's EKS Pod Identity role via the default AWS credential chain; there is no password anywhere.
 func newIAMPool(ctx context.Context, c dbConfig, creds aws.CredentialsProvider) (*pgxpool.Pool, error) {
 	cfg, err := poolConfig(c, c.User)
 	if err != nil {
@@ -92,6 +92,6 @@ func newIAMPool(ctx context.Context, c dbConfig, creds aws.CredentialsProvider) 
 	cfg.MaxConns = 4
 	// Every query (and connect) becomes a child span of the request span.
 	cfg.ConnConfig.Tracer = otelpgx.NewTracer()
-	// pgxpool connects lazily, so a paused Aurora doesn't block startup.
+	// pgxpool connects lazily, so an unavailable Aurora doesn't block startup.
 	return pgxpool.NewWithConfig(ctx, cfg)
 }

@@ -53,7 +53,7 @@ func migrate(ctx context.Context) error {
 		return err
 	}
 	cfg.ConnConfig.Password = password
-	// Aurora may be paused; give it time to resume.
+	// Aurora may still be starting (e.g. right after power.py up); give it time.
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	conn, err := pgx.ConnectConfig(ctx, cfg.ConnConfig)

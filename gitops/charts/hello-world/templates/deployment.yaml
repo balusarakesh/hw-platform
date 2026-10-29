@@ -76,7 +76,7 @@ spec:
             httpGet: { path: /healthz, port: http }
             periodSeconds: 10
             failureThreshold: 3
-          # Readiness: can it serve? (see app/main.go for why a paused DB doesn't fail it)
+          # Readiness: can it serve? (see handleReadyz in app/server.go for why the DB doesn't fail it)
           readinessProbe:
             httpGet: { path: /readyz, port: http }
             periodSeconds: 5
