@@ -7,6 +7,9 @@ argocdToken:
 runnerServiceAccount:
   create: true
   name: hw-runners-push
+# Push runners: pushes to main only.
+jobGuard:
+  mode: main
 gha-runner-scale-set:
   githubConfigUrl: https://github.com/balusarakesh/hw-platform
   # Kubernetes Secret written by the github-app ExternalSecret (GitHub App id, installation id, key).
@@ -58,6 +61,9 @@ gha-runner-scale-set:
           image: ghcr.io/actions/actions-runner:2.338.2@sha256:759a1d94a15b05941aba5196974ff43fe15b4cbba29b694b35cbc32a1166b232
           command: ["/home/runner/run.sh"]
           env:
+            # Runs templates/job-guard.yaml before every job; a failure stops the job.
+            - name: ACTIONS_RUNNER_HOOK_JOB_STARTED
+              value: /opt/job-guard/job-started.sh
             # GitHub App credentials (same ExternalSecret the runner registration uses) so the job can
             # mint a short-lived installation token to open the image-bump PR.
             - name: GITHUB_APP_ID
@@ -75,3 +81,8 @@ gha-runner-scale-set:
           resources:
             requests: { cpu: 100m, memory: 256Mi }
             limits: { cpu: "1", memory: 1Gi }
+          volumeMounts:
+            - { name: job-guard, mountPath: /opt/job-guard, readOnly: true }
+      volumes:
+        - name: job-guard
+          configMap: { name: runner-job-guard, defaultMode: 0555 }

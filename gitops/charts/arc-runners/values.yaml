@@ -10,4 +10,8 @@ argocdToken:
 runnerServiceAccount:
   create: false
   name: ""
+# Runner-side check of who may use this pool (templates/job-guard.yaml); each pool sets its mode.
+jobGuard:
+  mode: ""
+  repository: balusarakesh/hw-platform
 gha-runner-scale-set: {}

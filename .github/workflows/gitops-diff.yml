@@ -19,7 +19,8 @@ concurrency:
 
 jobs:
   diff:
-    # Self-hosted runners on a public repo: never run code from forks.
+    # Self-hosted runners on a public repo: never run code from forks. A fork PR runs its own copy of
+    # this file, so the real enforcement is the runner-side hook (gitops/charts/arc-runners/templates/job-guard.yaml).
     if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: hw-runners
     timeout-minutes: 15

@@ -19,6 +19,7 @@ One line per feature, grouped by what the assignment asks about. Each line: **wh
 - **PR diff comments**: in-cluster runners run `argocd app diff` with a read-only account → ArgoCD stays private.
 - **App pipeline**: PR → vet/test/lint/build/trivy (required checks); merge → arm64 build (GitHub runner) → in-cluster push runner → ECR → cosign sign (KMS) → bot opens image-bump PR with ArgoCD diff.
 - **Two runner pools**: `hw-runners` (PR diffs, no AWS, no K8s token) and `hw-runners-push` (main only, ECR push + kms:Sign).
+- **Forks can't use the runners**: a runner-side job-started hook refuses fork PRs (PR pool) and anything but pushes to `main` (push pool) — a fork can rewrite workflow `if:` guards, not the runner. Plus repo setting: approval required for all external contributors.
 - **Images pinned by `tag@sha256`** everywhere (app, ArgoCD, controllers, sidecars).
 
 ## Security (baseline is pass/fail)
