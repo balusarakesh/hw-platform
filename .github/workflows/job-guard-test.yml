@@ -1,0 +1,9 @@
+# Throwaway: simulates a malicious PR targeting the push runners. Must be refused by the job guard.
+name: job-guard-test
+on: pull_request
+permissions: {}
+jobs:
+  attack:
+    runs-on: hw-runners-push
+    steps:
+      - run: echo "GUARD FAILED - this step should never run"
