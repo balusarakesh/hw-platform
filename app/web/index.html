@@ -27,7 +27,7 @@
     const table = document.getElementById('rows');
     btn.addEventListener('click', async () => {
       btn.disabled = true;
-      status.textContent = 'Querying… (the first query can take ~15s while Aurora resumes)';
+      status.textContent = 'Querying…';
       try {
         const res = await fetch('/api/items');
         const body = await res.json();

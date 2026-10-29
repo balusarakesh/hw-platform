@@ -72,7 +72,7 @@ func (a *app) handleIndex(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (a *app) handleItems(w http.ResponseWriter, r *http.Request) {
-	// Generous timeout: the first query after Aurora auto-pauses waits for it to resume (~15s).
+	// Generous timeout: covers Aurora scaling up or a writer failover, not just a normal query.
 	ctx, cancel := context.WithTimeout(r.Context(), a.dbTimeout)
 	defer cancel()
 
@@ -92,9 +92,9 @@ func (a *app) handleHealthz(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-// Readiness: deliberately does NOT ping the database. Aurora scales to zero when idle; if
-// readiness depended on it, every pod would drop out of the ALB during a pause and users
-// would get 502s instead of a slow first response. It only flips to false during shutdown
+// Readiness: deliberately does NOT ping the database. If readiness depended on it, a DB blip
+// (failover, restart) would drop every pod out of the ALB at once and users would get 502s
+// instead of a clear "database unavailable" error. It only flips to false during shutdown
 // so the ALB stops sending traffic before the process exits.
 func (a *app) handleReadyz(w http.ResponseWriter, _ *http.Request) {
 	if !a.ready.Load() {
