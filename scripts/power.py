@@ -249,29 +249,71 @@ def scale_cluster_autoscaler(aws: Aws, replicas: int, yes: bool) -> None:
     act(yes, f"scale kube-system/cluster-autoscaler to {replicas}", scale)
 
 
+def webhook_backends(core) -> set[tuple[str, str]]:
+    """(namespace, pod name) of every pod that serves an admission webhook.
+
+    A webhook with failurePolicy Fail rejects requests while its backend is down; Kyverno's matches
+    pod DELETE, so deleting Kyverno before the other pods makes every later delete fail.
+    """
+    from kubernetes import client
+
+    adm = client.AdmissionregistrationV1Api(core.api_client)
+    services = set()
+    for configs in (adm.list_validating_webhook_configuration(), adm.list_mutating_webhook_configuration()):
+        for cfg in configs.items:
+            for hook in cfg.webhooks or []:
+                svc = hook.client_config.service
+                if svc is not None:
+                    services.add((svc.namespace, svc.name))
+    pods = set()
+    for namespace, name in services:
+        selector = core.read_namespaced_service(name, namespace).spec.selector
+        if not selector:
+            continue
+        label_selector = ",".join(f"{k}={v}" for k, v in selector.items())
+        for pod in core.list_namespaced_pod(namespace, label_selector=label_selector).items:
+            pods.add((namespace, pod.metadata.name))
+    return pods
+
+
 def drain_nodes(aws: Aws, yes: bool) -> None:
     """Cordon every node and delete its non-DaemonSet pods, bypassing PodDisruptionBudgets.
 
     PDBs protect a service from *voluntary* disruption while it keeps running; on a deliberate full
     power-down they can't be satisfied (there's nowhere to reschedule) and only make EKS wait ~15 min
     per node before force-terminating it. The replacement pods simply stay Pending until `up`.
+
+    All nodes are cordoned first so nothing reschedules onto a node that's still running, and webhook
+    backends are deleted last so their webhooks keep admitting the other deletes. A delete that still
+    fails is logged, not fatal: the node group scale-down evicts whatever is left.
     """
+    from kubernetes.client.rest import ApiException
 
     def drain() -> None:
         _, core, _ = k8s_api(aws)
         for node in core.list_node().items:
-            name = node.metadata.name
-            core.patch_node(name, {"spec": {"unschedulable": True}})
-            pods = core.list_pod_for_all_namespaces(field_selector=f"spec.nodeName={name}").items
-            for pod in pods:
-                owners = pod.metadata.owner_references or []
-                if any(o.kind == "DaemonSet" for o in owners):
-                    continue  # DaemonSet pods go away with the node
+            core.patch_node(node.metadata.name, {"spec": {"unschedulable": True}})
+        pods = [
+            p for p in core.list_pod_for_all_namespaces().items
+            if p.spec.node_name and not any(o.kind == "DaemonSet" for o in (p.metadata.owner_references or []))
+        ]
+        backends = webhook_backends(core)
+        pods.sort(key=lambda p: (p.metadata.namespace, p.metadata.name) in backends)
+        deleted = failed = 0
+        for pod in pods:
+            try:
                 core.delete_namespaced_pod(pod.metadata.name, pod.metadata.namespace)
-            log.info("drained %s (%d pods deleted)", name, sum(
-                1 for p in pods if not any(o.kind == "DaemonSet" for o in (p.metadata.owner_references or []))))
+                deleted += 1
+            except ApiException as e:
+                if e.status == 404:
+                    continue
+                failed += 1
+                log.warning("could not delete %s/%s (%s); the node scale-down will evict it",
+                            pod.metadata.namespace, pod.metadata.name, e.reason)
+        log.info("cordoned all nodes; deleted %d pods (%d webhook backends last), %d failed",
+                 deleted, len(backends), failed)
 
-    act(yes, "cordon all nodes and delete their pods (bypassing PDBs)", drain)
+    act(yes, "cordon all nodes and delete their pods (bypassing PDBs; webhook backends last)", drain)
 
 
 def get_app(aws: Aws, name: str) -> Optional[dict]:
